@@ -1,0 +1,434 @@
+---
+title: "Modelowanie wielkości roszczeń ubezpieczeniowych rozkładem Gamma."
+author: "Szymon Pawłowski s176528"
+output: pdf_document
+---
+
+```{r claims-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Modelowanie wielkości roszczeń ubezpieczeniowych rozkładem Gamma
+
+## Wprowadzenie
+
+W pracy przedstawione zostanie pokrótce teoretyczne podejście do tematu generowanie liczb z rozkładu Gamma, a następnie zaimplementowane zostaną dwa generatory z tego rozkładu. Pierwszym z nich będzie generator stworzony przy pomocy algorytmu GKM1, natomiast drugi będzie opierał się na algorytmie Ahrensa-Dietera. Porównane zostaną czasy, jak też średnie liczby iteracji z obu implementacji. 
+
+Przytoczony zostanie także generator liczb z rozkładu Poissona stworzony w ramach ostatniego projektu z lekką modyfikacją wykluczającą możliwość wykorzystania własnego generatora liczb z rozkładu jednostajnego z racji skorzystania z generatora wbudowanego. Później zamodelowany zostanie proces roszczeń ubezpieczeniowych z wykorzystaniem wyżej wspomnianego generatora, jak też zaimplementowanego generatora liczb z rozkładu Gamma. 
+
+## Rozkład Gamma
+Rozkład Gamma z parametrem kształtu $a$ oraz skali $\beta$ ma gestość równą 
+$$f(y) = f_{a, \beta}(y) = \frac{1}{\Gamma (a)\beta^a}y^{a-1}e^{-y/\beta}, \quad y\geq 0$$
+Taki rozkład posiada średnią równią $a\beta$ oraz wariancję $a\beta^2$. Metody próbkowania z rozkładu Gamma możemy rozróżnić na te uwzględniające sytuację dla $a \leq 1$ oraz $a > 1$. W przypadku wykorzystania generatora do modelowania stóp procentowych w większości przypadków spotkamy sytuację z $a>1$, natomiast uwzględniona zostanie także sytuacja dla $a \leq 1$. Nie ma natomiast straty ogólności przy założeniu $\beta = 1$, ponieważ jeśli $X$ ma rozkład Gamma z parametrami $(a,1)$ to $\beta X$ ma rozkład Gamma z parametrami $(a, \beta)$.
+
+Stworzymy także funkcję do wykreślania gęstości.
+
+```{r claims-r2, echo=TRUE}
+plot_hist <- function(X){
+  if( typeof(X) == "list"){
+    S <- unlist(X[1])
+    iters <- unlist(X[2])
+    title = "Histogram X - generator zaimplementowany"
+    txt = "Generator zaimplementowany"
+    print(paste("Liczba iteracji: ",iters, sep=""))
+  } else {
+    S <- X
+    title = "Histogram X - generator wbudowany"
+    txt = "Generator wbudowany"
+  }
+  hist(S, prob=TRUE, col="grey", xlab = "X", main = title)
+  lines(density(S), col="blue", lwd=2)
+  print(paste(txt, " średnia: ", mean(S), sep=""))
+  print(paste(txt, " wariancja: ", var(S), sep=""))
+  
+}
+```
+
+## Algorytm GKM1
+Przypuśćmy, że pewna funkcja $f$ jest nieujemna oraz całkowalna na zbiorze $[0, \infty)$. Jeżeli $(X,Y)$ ma rozkład jednostajny na zbiorze $A = \{(x,y): x \leq \sqrt{f(y/x)}\}$ to wówczas gęstość $Y/X$ jest proporcjonalna do $f$. Zatem, aby jednostajnie próbkować z $A$ możemy powtarzalnie, jednostajnie wybierać pary $(X,Y)$  z prostokąta i zachowywać pierwsze, dla których $X \leq \sqrt{f(Y/X)}$.
+W celu próbkowania z gęstości Gamma z parametrem $a > 1$ zdefiniujemy zbiór $A$, tj.
+$$A = \{(x,y): 0\leq x \leq \sqrt{[(y/x)^{a-1}e^{-y/x}}\}$$
+Ten zbiór jest zawarty w prostokącie $[0,\overline{x}] \times [0,\overline{y}]$ gdzie $\overline{x} = [(a-1)/e]^{(a-1)/2}$. Próbkując jednostajnie z tego prostokąta oczekiwana liczba próbek potrzebna do czasu wypadnięcia w $A$ jest określona przez proporcję wymiaru $A$ do wymiaru tego prostokąta. Określone jest przez $O(\sqrt{a})$, więc czas potrzebny do wygenerowania próbki tą metodą wzrasta wraz z parametrem kształtu. W algorytmie GKM1 mamy w pierwszej kolejności wykonany test akceptacji, który zmniejsza liczbę przekształceń logarytmicznych. Poniżej znajduje się zaimplementowany algorytm.
+
+```{r claims-1r, echo=TRUE}
+gkm1 <- function(a, beta, N){
+  if(a <= 1){
+    return("Niewłaściwy parametr a!")
+  } else {
+    ap <- a-1
+    b <- (a-(1/(6*a)))/ap
+    m <- 2/ap
+    d <- m+2
+    
+    niter <- 0 
+    X <- c()
+    
+    while(length(X) < N){
+      sample <- "Reject"
+      while(sample != "Accept"){
+        niter <- niter + 1
+        U1 <- runif(1)
+        U2 <- runif(1)
+        V <- b*U2/U1
+      
+        check1 <- m*U1 - d + V + (1/V)
+        check2 <- m*log(U1) - log(V) + V - 1
+
+        if(check1 <= 0){
+          sample <- "Accept"
+        } else if(check2 <= 0){
+          sample <- "Accept"
+        } else {
+          sample <- "Reject"
+        }
+      }
+    X <- append(X, beta*ap*V)
+    }
+  }
+  
+  return(list(X, niter))
+}
+```
+
+## Algorytm Ahrensa-Dietera
+Algorytm Ahrensa-Dietera obsługuje przypadek, gdy $a \leq 1$. Generowani są "kandydaci" poprzez próbkowanie z rozkładów skoncentrowanych na przedziałach $[0,1]$ oraz $(1, \infty)$ z odpowiednimi prawdopodobieństwami. W szczególności niech $p = e/(a + e)$ oraz
+$$g(z) = \left\{ \begin{array}{ll} paz^{a-1}, &  0 \leq z \leq 0\\
+        (1-p)e^{-z+1}, & z > 1.\end{array} \right. $$
+Jest to gętość, która jest "mieszanką" gęstości $az^{a-1}$ na $[0,1]$ oraz $e^{-z+1}$ na $(1,\infty)$ z odpowiednimi wagami $p$ i $(1-p)$. Możemy próbkować z $g$ poprzez próbkowanie z każdej z tych gęstości z przypisanym prawdopodobieństwem. Każda z tych dwóch gęstości jest łatwo próbkowana przy wykorzystaniu metody odwrotnej transformaty tj. dla gęstości $az^{a-1}$ możemy wykorzystać $U^{1/a}$, gdzie $U \sim Unif[0,1]$ oraz dla gęstości $e^{-z+1}$ mamy $1-log(U)$. Próbki z $g$ są odpowiednimi kandydatami dla metody "accept-rejection" ponieważ proporcja $f_{a,1}(z)/g(z)$ z $f_{a,1}$ gęstością Gamma jest ograniczona. Wgląd w tą proporcję nasuwa, że kandydat $Z$ na przedziale $[0,1]$ jest akceptowany z prawdopodobieństwem $e^{-Z}$, a kandydat na $(1, \infty)$ jest akceptowany z prawdopodobieństwem $Z^{a-1}$. Globalne ograniczenie proporcji dane jest poprzez
+$$f_{a,1}(z) / g(z) \leq \frac{a+e}{ae\Gamma(a)} \leq 1.39,$$
+gdzie warto przypomnieć, iż górna granica ograniczenia takiej proporcji określa oczekiwaną liczbę kandydatów wygenerowanych przy akceptowanej próbce. W poniższym algorytmie warto zwrócić uwagę na fakt, że gdy warunek $Y\leq 1$ zawodzi to wówczas $Y$ ma rozkład jednostajny na $[1,b]$ co oznacza, że $(b-Y)/a$ ma rozkład $U/e$ ($U \sim Unif[0,1]$), a więc $-log((b-Y)/a)$ ma rozkład $1-log(U)$. 
+
+```{r claims-rar, echo=TRUE}
+adr <- function(a, beta, N){
+  if(a > 1){
+    return("Niewłaściwy parametr a!")
+  } else {
+    b <- (a + exp(1))/exp(1)
+    
+    niter <- 0 
+    X <- c()
+    
+    while(length(X) < N){
+      sample <- "Reject"
+      while(sample != "Accept"){
+        niter <- niter + 1
+        U1 <- runif(1)
+        U2 <- runif(1)
+        Y <- b*U1
+        
+        if (Y <= 1){
+          Z <- Y^(1/a)
+          if (U2 < exp(-Z)){
+            sample <- "Accept"
+          }
+        } else {
+          Z <- -log((b-Y)/a)
+          if (U2 <= Z^(a-1)){
+            sample <- "Accept"
+          }
+        }
+      }
+    X <- append(X, beta*Z)
+    }
+  }
+  
+  return(list(X, niter))
+}
+```
+
+## Testowanie
+Po implementacji obu algorytmów przygotujemy funkcję, która będzie pozwalała na swobodne korzystanie z generatora liczb z rozkładu Gamma zależnie od przyjętego parametru kształtu $a$.
+
+```{r claims-rgamma, echo=TRUE}
+gam <- function(a, beta, N, unlist=FALSE){
+  if (a <= 1){
+    G <- adr(a,beta,N)
+  } else {
+    G <- gkm1(a, beta, N)
+  }
+  
+  if (unlist){
+    G <- unlist(G[1])
+  }
+  return(G)
+}
+```
+
+Zacznijmy od przypadku $a <= 1$ i wykreślmy histogram z przyrównaniem do próbki wygenerowanej z generatora wbudowanego. Niech $a = 1$ oraz $\beta = 2$ dla próbki $N=1000$. 
+
+```{r claims-r3comp, echo=TRUE}
+G1 <- gam(1,2,1000)
+G2 <- rgamma(n=1000, scale=2, shape=1)
+plot_hist(G1)
+plot_hist(G2)
+```
+
+Możemy bez problemu dostrzec zbieżność obydwu próbek. Sprawdźmy, więc sytuację dla parametrów $a = 0.5$ oraz $\beta = 1$.
+
+```{r claims-r3comp2, echo=TRUE}
+G1 <- gam(0.5,1,1000)
+G2 <- rgamma(n=1000, scale=1, shape=0.5)
+plot_hist(G1)
+plot_hist(G2)
+```
+
+Ponownie histogramy są do siebie zbliżone. Świadczy to o poprawności zaimplementowanego algorytmu oraz osiąganiu poprawnych wyników próbki dla przypadku $a<=1$. Co więcej, ukazuje to faktyczny brak straty ogólności przy zakładaniu $\beta =1$ podczas implementacji i przemnożeniu przez ten czynnik w końcowym etapie. Zobaczmy sytuację dla $a>1$, więc weźmy pod uwagę $a = 2$ oraz $\beta = 2$. 
+
+```{r claims-r3comp3, echo=TRUE}
+G1 <- gam(2,2,1000)
+G2 <- rgamma(n=1000, scale=2, shape=2)
+plot_hist(G1)
+plot_hist(G2)
+```
+
+Ponownie zgodnie z oczekiwaniami również otrzymujemy zbieżności obydwu histogramów. Rozpatrzmy jeszcze 
+$a = 9$ oraz $\beta = 0.5$.
+
+```{r claims-r3comp4, echo=TRUE}
+G1 <- gam(9,0.5,1000)
+G2 <- rgamma(n=1000, scale=0.5, shape=9)
+plot_hist(G1)
+plot_hist(G2)
+```
+
+Rzeczywiście w dalszym ciągu wartości są zbliżone. Co więcej, oprócz wizualnego porównania możemy dostrzec, iż mimo niewielkich odchyleń, wartości statystyk (średniej i wariancji) są sobie bliskie. Wnioskujemy po tym, iż zaimplementowany algorytm generowanie próbki z rozkładu Gamma jest poprawny.
+
+Kolejną rzeczą, którą sprawdzimy jest czas i liczba potrzebnych iteracji do wygenerowania próbki w zależności od przyjętego parametru $a$, jako że korzystamy wówczas z innych algorytmów. W pierwszej kolejności sprawdźmy dla $N \in \{100, 1000, 5000, 10000, 20000\}$ przy $a = 0.5$ jako $a <=1$ (więc algorytm Ahrensa-Dietera) oraz $a=2$ jako $a>1$ (algorytm GKM1).
+
+```{r claims-r2time2, echo=TRUE}
+iters1 <- c()
+time1 <- c()
+iters2 <- c()
+time2 <- c()
+x <- c()
+N <- c()
+for (n in c(100, 1000, 5000, 10000, 20000)){
+  N <- append(N, n)
+
+  start.time <- as.numeric(as.numeric(Sys.time())*1000, digits=15)
+  G1 <- gam(0.5, 2, N=n)
+  end.time <-  as.numeric(as.numeric(Sys.time())*1000, digits=15)
+  t1 <- end.time - start.time
+
+
+  iters1 <- append(iters1, unlist(G1[2]))
+  time1 <- append(time1, t1)
+  
+  start.time <- as.numeric(as.numeric(Sys.time())*1000, digits=15)
+  G2 <- gam(2, 2, N=n)
+  end.time <-  as.numeric(as.numeric(Sys.time())*1000, digits=15)
+  t2 <- end.time - start.time
+
+  
+  iters2 <- append(iters2, unlist(G2[2]))
+  time2 <- append(time2, t2)
+  
+  print(paste("Liczba iteracji dla a <=1: ", unlist(G1[2]), " przy N=", n,sep=""))
+  print(paste("Liczba iteracji a >1: ", unlist(G2[2]), " przy N=", n, sep=""))
+  
+  print(paste("Czas wykonania algorytmu dla a <=1: ", t1, " przy N=", n,sep=""))
+  print(paste("Czas wykonania algorytmu a >1: ", t2, " przy N=", n, sep=""))
+
+}
+
+plot(N, iters1,  type = "b", col = "red" , lwd = 3, pch = 1, xlab="", ylab="")
+lines(N, iters2, type = "b", col = "green" , lwd = 3, pch = 1)
+title(main = "Liczba iteracji względem wielkości próbki", xlab = "Wielkość próbki N", ylab="Liczba iteracji")
+legend("topleft", legend=c("Ahrens-Dieter (a<=1)", "GKM1 (a>1)"), col=c("red","green"),lty=1:2, cex=0.8)
+
+plot(N, time1,  type = "b", col = "red" , lwd = 3, pch = 1, xlab="", ylab="")
+lines(N, time2, type = "b", col = "green" , lwd = 3, pch = 1)
+title(main = "Czas wykonania algorytmu względem wielkości próbki", xlab = "Wielkość próbki N", ylab="Czas [ms]")
+legend("topleft", legend=c("Ahrens-Dieter (a<=1)", "GKM1 (a>1)"), col=c("red","green"),lty=1:2, cex=0.8)
+
+```
+
+Możemy zauważyć, że zarówno liczba iteracji jak i czas generowania próbki jest zbliżony dla obydwu algorytmów. Oczywiście są pewne odchylenia, ale nie są one znaczące. Bardzo dobrze jest to przedstawione na powyższej wizualizacji, gdzie możemy dostrzec jak zgodnie z oczekiwaniami liczba iteracji jak też długość czasu trwania wzrasta wraz z próbką, ale wartości dla obydwu algorytmów są sobie bliskie. Widać jednak również, że dla algorytmu Ahrensa-Dietera czas wzrasta szybciej niż dla algorytmu GKM1.
+
+## Modelowanie procesu roszczeń ubezpieczeniowych
+W celu zamodelowania procesu roszczeń ubezpieczeniowych posłużymy się zaimplementowanym generatorem z rozkładu Gamma oraz lekko zmienionym generatorem z rozkładu Poissona z poprzedniej części projektu, tj.
+
+```{r claims-r9, echo=TRUE}
+poisson <- function(N,theta){
+    X <- c()
+    while(length(X) < N){
+      p <- exp(-theta)
+      Fd <- p
+      Nbig <- 0
+
+      
+      U <- runif(2)
+      U1 <- U[2]
+      
+      while (U1 > Fd){
+        Nbig <- Nbig + 1
+        p <- p*theta/Nbig
+        Fd <- Fd + p
+        }
+      X <- append(X,Nbig)
+      }
+    return(X)
+}
+```
+
+W tym rozdziale zamodelujemy proces roszczeń ubezpieczeniowych poprzez zbudowanie modelu probabilistycznego, który opisze nam proces pojawiania się zagregowanych roszczeń ubezpieczeniowych w pewnym okresie czasowym. Taki system ubezpieczeniowy może być złożony z pojedynczej polisy czy też grupy kontraktów ubezpieczeniowych. Zagregowane roszczenia są sumą wszystkich roszczeń zaboserwowanych w pewnym okresie. Możemy wyróżnić wówczas model indywidualnego ryzyka, w którym rozważa się stratę z każdego indywidualnego kontraktu bądź model ryzyka zbiorowego, który modeluje podejścia rozważające rozkład częstości, jak też surowości roszczeń. Można go przedstawić jako 
+$$S_N = X_1 + X_2 +... + X_N,$$
+gdzie $N$ jest zmienną losową oznaczającą liczbę strat (lub liczbę wypłat). Naturalnie możemy założyć $X_i>0$, ponieważ gdy $X_i = 0$ to nie mamy roszczenia. Zakładamy, że $N=n, X_1, X_2, ..., X_n$ są niezależnymi zmiennymi losowymi o jednakowych rozkładach. 
+
+Rozkład $N$ znany jest jako rozkład częstości. W naszym przypadku skorzystamy z rozkładu Poissona, który jest jednym ze znanych rozkładów dyskretnych (oprócz tego popularny jest rozkład dwumianowy oraz dwumianowy ujemny). Jak wiadomo, rozkład ten możemy traktować jako rozkład liczący ilość wystąpień jakiegoś zdarzenia losowego w określonej jednostce czasu, a więc także liczący ilość wystąpień roszczeń ubezpieczeniowych w danym okresie.
+
+Z kolei wspólny rozkład $X$ znany jest jako rozkład surowości. Jako, że podchodzimy do modelu procesu roszczeń ubezpieczeniowych poprzez model ryzyka zbiorowego to opieramy się na oddzielnym modelowaniu częstości i wysokości roszczeń. W takiej sytuacji popularnym jest stosowanie, jak wyżej napisano, modelowanie częstości poprzez proces Poissona wraz z modelowaniem wysokości roszczeń rozkładem Gamma. Oprócz tego, stosuje się także rozkład Pareto czy też Weibulla. 
+
+Nasz algorytm modelu wygląda następująco:
+
+ 1. Zakładamy model ryzyka zbiorowego $S_N = X_1 + ... + X_N$;
+ 
+ 2. Niech $j = 1, ..., m$ będzie iteratorem ustawionym od $j=1$;
+ 
+ 3. Generujemy liczbę roszczeń $n_j$ z rozkładu częstości $N$;
+ 
+ 4. Mając wartość $n_j$ generujemy wysokość każdego z roszczeń niezależnie z rozkładu surowości $X$ oznaczonego poprzez $x_{1j}, ..., x_{n_jj}$;
+ 
+ 5. Przeliczamy zagregowaną stratę $s_j = x_{1j} + ... + x_{n_jj}$;
+ 
+ 6. Powtarzamy powyższe trzy kroki dla $j=2, ..., m$ otrzymując próbkę $S_N$ wielkości $m$, tj. $\{s_1, ..., s_m\}$. 
+
+Dla naszego modelu rozważamy rozkład częstości $N \sim Poiss(\lambda = 25)$ oraz rozkład wysokości roszczeń $X \sim Gamma(5, 2)$. Poniżej zaprezentowano kod symulacyjny agregowaną wysokość roszczeń.  
+
+```{r claims-roszczeniemodel1, echo=TRUE}
+insurance_model <- function(t, lambda=25, a=5, beta=2, seed=123){
+  set.seed(seed)
+  S <- rep(NA,t)
+    
+  n <- poisson(t, theta=lambda)
+  for (j in 1:t){
+    n_j <- n[j]
+    x_j <- gam(a, beta, n_j, unlist=TRUE)
+    s_j <- sum(x_j)
+    S[j] <- s_j
+  }
+  return(S)
+  
+}
+```
+
+Sprawdźmy jak kreuje się ona dla czasu $t = 12$ miesięcy przy podanych parametrach.
+
+```{r claims-checkmodelins, echo=TRUE}
+S <- insurance_model(t=12)
+hist(S)
+print(paste("Suma roszczeń na przedziale 12 miesięcy: ", sum(S), sep=""))
+```
+
+Widzimy, że zamodelowana suma roszczeń przy tych parametrach wynosi odpowiednią kwotę w złotych (przypuścmy dla ułatwienia, że naszą jednostką jest złoty polski). Z kolei z histogramu możemy odczytać najczęściej występujące wysokości roszczeń. Sprawdźmy jakie jest prawdopodobieństwo, przy owych współczynnikach rozkładów częstości i wysokości roszczeń, że w czasie $t=12$ miesięcy suma roszczeń przekroczy $K=3000$ zł. Stworzymy funkcję ułatwiającą szacowanie prawdopodobieństwa dla innych układów parametrów. 
+```{r claims-rroszczeniemodel, echo=TRUE}
+insurance_model_probability <- function(K, t, N = 1000, lambda=25, a=5, beta=2){
+  p = 0
+  for (i in 1:N){
+    seed = i
+    
+    S <- insurance_model(t = t, lambda = lambda, a = a, beta = beta, seed=seed)
+    
+    if (sum(S) > K){
+      p = p+1
+    }
+  }
+  
+  prob = p/N
+
+  print(paste("Prawdopodobieństwo przekroczenia sumy K: ", K, " w czasie t: ", t, " wynosi: ", prob,       " dla parametrów lambda= ", lambda, " ,a= ", a, " ,beta= ", beta, ".",sep=""))
+  
+  return(c(t, K, prob))
+  }
+
+```
+
+```{r claims-rmodel4, echo=TRUE}
+str1 <- insurance_model_probability(K = 3000,  t=12)
+```
+
+Oznacza to, że przy danych parametrach częściej stracimy mniej jak 3000 zł. Sprawdźmy jak to prawdopodobieństwo zmienia się na przedziale $[2950, 3350]$ zł ze skokiem co $100$.
+
+```{r claims-rmodelins6, echo=TRUE}
+K <- c()
+prob <- c()
+for (ks in seq(2950,3350,100)){
+    K <- append(K, ks)
+    str1 <- insurance_model_probability(K = ks,  t=12)
+    prob <- append(prob, str1[3])
+}
+plot(x= K, y=prob, type = "b", pch = 19, col="red", xlab= "Wysokość K", ylab = "Prawdopodobieństwo przekroczenia K")
+```
+
+Możemy zauważyć, że to prawdopodobieństwo dość drastycznie spada wraz ze wzrostem wysokości $K$. Zobaczmy jednak inny układ parametrów rozkładów częstości i wysokości roszczeń. Weźmy $\lambda = 15$, $a = 9$ oraz $\beta = 5$. Najpierw sprawdźmy rozkład sumy roszczeń.
+
+```{r claims-checkmodelins20, echo=TRUE}
+S <- insurance_model(t=12, lambda = 15, a = 9, beta=5)
+hist(S)
+print(paste("Suma roszczeń na przedziale 12 miesięcy: ", sum(S), sep=""))
+```
+
+Widzimy, że suma jest znacznie wyższa. Z histogramu ponownie możemy odczytać najczęściej występujące roszczenia. Ustawmy, więc sprawdzenie przy tych parametrach dla $K$ w zakresie $[8800,9200]$. 
+
+```{r claims-rmodelins15, echo=TRUE}
+K <- c()
+prob <- c()
+for (ks in seq(7800,8200,100)){
+    K <- append(K, ks)
+    str1 <- insurance_model_probability(K = ks,  t=12, lambda=15, a = 9, beta = 5)
+    prob <- append(prob, str1[3])
+}
+plot(x= K, y=prob, type = "b", pch = 19, col="red", xlab= "Wysokość K", ylab = "Prawdopodobieństwo przekroczenia K")
+```
+
+Widzimy, że tutaj prawdopodobieństwo spada już w znacznie wolniejszym tempie. Nic dziwnego, w tym przypadku spodziewamy się średnio częstości 15 roszczeń o wyższej wartości oczekiwanej co wynika z własności rozkładów Gamma i Poissona. Na przykładzie tych dwóch zestawów parametrów sprawdźmy jeszcze wpływ okresu czasu i zmieńmy $t = 24$ miesiące czyli okres dwóch lat. W pierwszej kolejności ponownie przejrzymy rozkłady sumy roszczeń. Dla pierwszego zestawu parametrów: 
+
+```{r claims-checkmodelins53, echo=TRUE}
+S <- insurance_model(t=24)
+hist(S, breaks = 15)
+print(paste("Suma roszczeń na przedziale 24 miesięcy: ", sum(S), sep=""))
+```
+
+oraz dla drugiego zestawu:
+
+```{r claims-checkmodelins76, echo=TRUE}
+S <- insurance_model(t=24, lambda = 15, a = 9, beta=5)
+hist(S, breaks = 15)
+print(paste("Suma roszczeń na przedziale 24 miesięcy: ", sum(S), sep=""))
+```
+
+Naturalnie wysokość roszczeń się zwiększyła z racji wydłużonej ilości możliwych skoków czasowych, a wzrost ten jest blisko dwukrotny tak jak wzrost okresu. Zobaczmy wpływ na prawdopodobieństwo ustawiając $K$ na przedziale $[5900, 6300]$ oraz $[16400, 16800]$ dla zestawu 1 i 2 odpowiednio. 
+
+```{r claims-rmodelins15z1, echo=TRUE}
+K <- c()
+prob <- c()
+for (ks in seq(5900,6300,100)){
+    K <- append(K, ks)
+    str1 <- insurance_model_probability(K = ks,  t=24)
+    prob <- append(prob, str1[3])
+}
+plot(x= K, y=prob, type = "b", pch = 19, col="red", xlab= "Wysokość K", ylab = "Prawdopodobieństwo przekroczenia K")
+```
+
+```{r claims-rmodelins15z2, echo=TRUE}
+K <- c()
+prob <- c()
+for (ks in seq(16400,16800,100)){
+    K <- append(K, ks)
+    str1 <- insurance_model_probability(K = ks,  t=24, lambda=15, a = 9, beta = 5)
+    prob <- append(prob, str1[3])
+}
+plot(x= K, y=prob, type = "b", pch = 19, col="red", xlab= "Wysokość K", ylab = "Prawdopodobieństwo przekroczenia K")
+```
+
+Wnioski są analogiczne. Z racji doboru parametrów zestaw 1 ma szybciej malejące prawdopodobieństwo przekroczenia pewnej kwoty $K$ w przedziale czasowym $[0,t]$, natomiast dla zestawu 2 to prawdopodobieństwo maleje wolniej. Zwiększenie przedziału czasowego, więc nie "stabilizuje" nam prawdopodobieństwa przekroczenia pewnego poziomu straty. Dodatkowo w każdej z symulacji zostało ustawione ziarno w celu reprodukowalności wyników, jednak wcześniej przeprowadzono badanie bez tego zabiegu. Wyniki różniły się w każdej symulacji o spore ilości co wskazuje na wysoką nieprzewidywalność wysokości roszczeń. Oczywiście tutaj parametry zostały dobrane "po omacku", jednak to właśnie odpowiedni dobór parametrów rozkładu stanowi wyzwanie dla poprawnego zamodelowania zjawiska.  
+
+## Podsumowanie
+W kolejnym projekcie zaimplementowano dwa generatory liczb z rozkładu Gamma wraz z opisem teoretycznym. Każdy z nich uwzględniał inny przypadek parametru $a$, dlatego też połączono je w jeden generator w zależności od wartości tego parametru. Co więcej, wygenerowano z nich próbki oraz zwizualizowano przyrównując do generatorów wbudowanych. Wyniki były satysfakcjonujące.
+
+W kolejnej części przekształcono poprzednio zbudowany generator z rozkładu Poissona pod kątem stworzenia modelu procesu roszczeń ubezpieczeniowych. Rozpatrzono sumę straty (wielkości roszczeń ubezpieczeniowych) korzystając z modelu zbiorowego ryzyka przy użyciu rozkładów Poissona dla modelowania częstości oraz rozkładu Gamma dla modelowania wysokości roszczeń. Następnie rozpatrzono przykład dla różnych układów parametrów i dla każdego z nich oszacowano prawdopodobieństwo wystąpienia straty powyżej ustalonego poziomu $K$ na pewnym przedziale czasowym $[0,t]$. Wyniki te zaprezentowano w formie graficznej i poddano intepretacji. 
+
+
+
+
+

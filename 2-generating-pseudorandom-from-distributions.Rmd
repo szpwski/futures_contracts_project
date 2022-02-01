@@ -1,0 +1,738 @@
+---
+title: "Implementacja generatora liczb pseudolosowych z zadanych rozkładów"
+author: "Szymon Pawłowski s176528"
+output: pdf_document
+---
+
+```{r pseudo-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Implementacja generatora liczb pseudolosowych z zadanych rozkładów
+
+## Wprowadzenie
+Mając stworzony generator liczb pseudolosowych zakładamy dostępność idealnej sekwencji liczb losowych, czyli bierzemy pod uwagę ciąg niezależnych zmiennych losowych $U_1, U_2, ...$, gdzie każda z nich spełnia
+$$P(U_i\leq u) = \begin{cases}
+0, & u <0 \\
+u, & 0 \leq u <1 \\
+1, & u >1
+\end{cases}$$
+więc pochodzi z rozkładu jednostajnego $U([0,1])$. Często chcemy uzyskać ciąg liczb wygenerowanych z innego rozkładu niż rozkład jednostajny, w tym celu przeważnie wykorzystuje się transformacje na próbkach z rozkładu jednostajnego w celu przekształcenia ich w taki sposób, aby pochodziły z innego, żądanego rozkładu. Jedną z takich metod jest odwrotna transformacja.
+
+Podczas implementacji algorytmów do generowania liczb z różnych rozkładu będziemy korzystać z generatora liczb pseudolosowych z rozkładu jednostajnego utworzonego wcześniej, jak też z funkcji kontrolującej założenia. Przy czym za wartości $m$, $a$, $c$, $x$ będziemy brali 
+$$m = 2^{31} -1, \quad a = 16807, \quad c=24, \quad x=1$$
+jako wartości prawidłowe generatora,
+wartości
+$$m = 2^{11} +1, \quad a = 64, \quad c=73, \quad x=1$$
+jako wartości względnie poprawne oraz
+$$m = 8, \quad a=2, \quad c=1,\quad x=1$$
+jako wartości nieprawidłowe. 
+
+```{r pseudo-func, echo=FALSE}
+valid <- c(2^31 - 1, 16807, 24, 1)
+badvalid <- c(2^11+1, 64, 73,1)
+nonvalid <- c(8,2,1,1)
+
+
+lcgen <- function(n, m, a, c, x){
+  
+  gen <- vector(length = n)
+  
+  for (i in 1:n){
+    x <- (a * x + c) %% m
+    gen[i] <- x/m
+  }
+  
+  return(gen)
+}
+gcd <- function(x,y) {
+  r <- x%%y;
+  return(ifelse(r, gcd(y, r), y))
+}
+prime_division <- function(x,y){
+  is_prime <- function(n) n == 2L || all(n %% 2L:max(2,floor(sqrt(n))) != 0)
+  
+  div <- c(1:(y-1))
+  divisors <- div[x %% div == 0]
+  
+  primes <- c()
+  for (i in 1:length(divisors)){
+    if (is_prime(divisors[i])==TRUE){
+      if ((y-1) %% divisors[i] == 0){
+        
+        primes <- c(primes, TRUE)
+      
+      } else {
+        print(divisors[i])
+        primes <- c(primes, FALSE)
+      }
+    }
+  }
+  return(primes)
+}
+four_division <- function(x,y){
+  if (((x %% 4 == 0) & ((y-1) %% 4 == 0)) | ((x %% 4 != 0) & ((y-1) %% 4 != 0))){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+multiplication <- function(x,y){
+  if (y %% (x^(y-1)) != 0){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+multi_multiplication <- function(x,y){
+  info <- c()
+  for (i in 1:(x-2)){
+    if (y %% (x^i - 1) == 0){
+      info <- c(info, FALSE)
+    } else {
+      info <- c(info, TRUE)
+    }
+  }
+  return(info)
+}
+check_assumptions <- function(m,a,c){
+  if (c != 0){
+    if (gcd(c,m) == 1){
+      if (all(prime_division(m, a))==TRUE){
+        if (four_division(m, a)==TRUE){
+          return("Założenia spełnione!")
+        }
+        else{
+          return("Błąd! Liczba m podzielna przez 4, ale (a-1) nie jest!")
+        }
+      } else {
+        return("Błąd! Nie każda pierwsza liczba dzieląca m dzieli też a-1!")
+      }
+    } else {
+      return("Błąd! Liczby c i m nie są względnie pierwsze!")
+    }
+  } else if (c == 0){
+    if (multiplication(m, a)==TRUE){
+      if (all(multi_multiplication(m,a))==TRUE){
+        return("Założenia spełnione!")
+      } else {
+        return("Błąd! Liczba a^j - 1 jest wielokrotnością m dla pewnego j!")
+      }
+    } else {
+      return("Błąd! Liczba a^(m-1) jest wielokrotnością m!")
+    }
+  } else {
+    return("Przypadek nie został obsłużony!")
+  }
+}
+```
+
+## Metoda odwrotnej transformacji
+Przypuśćmy, że chcemy próbkować z dystrybuanty, a więc chcemy wygenerować zmienną losową $X$ z własnością taką, że $P(X \leq x) = F(x)$ dla każdego $x$. Wówczas metoda odwrotnej transformacji wygląda następująco
+$$X = F^{-1}(U), \quad U \sim U([0,1]),$$
+gdzie $F^{-1}$ jest odwrotną do dystrybuanty $F$ i jest poprawnie określona gdy $F$ jest ściśle rosnąca. W celu obejścia problemu, w którym $F$ jest spłaszczona (gdyż tam funkcja odwrotna nie będzie poprawnie zdefiniowana), funkcję odwrotną definiuje się poprzez
+$$F^{-1}(u) = \inf{\{x: \quad F(x)\geq u\}}.$$
+Zauważmy jednak, że jeśli $F$ jest stała na pewnym przedziale $[a,b]$, a $X$ ma dystrybuantę $F$ to 
+$$P(a < X \leq b) = F(b) - F(a) = 0$$
+więc takie obszary mają zerowe prawdopodobieństwo dla wystąpienia tam zmiennej losowej. Jeśli $F$ ma ciągłą pochodną (gęstość) to wówczas jest ściśle rosnąca wszędzie, gdzie gęstość nie jest zerowa. W celu pokazania, że metoda odwrotnej transformacji generuje próbki z dystrybuanty $F$, sprawdzamy rozkład $X$, który zwraca
+$$P(X\leq x) = P(F^{-1}(U) \leq x) = P(U\leq F(x)) = F(x)$$
+Co więcej, można interpretować tą metodę jako fakt, że percentyl, w który $X$ "wpada" ma rozkład jednostajny. Metoda odwrotnej transformacji wybiera jednostajnie percentyl, który następnie mapuje do odpowiadającej wartości zmiennej losowej. 
+
+
+## Rozkład wykładniczy
+Rozkład wykładniczy o średniej $\theta$ ma dystrybuantę
+$$F(x) = 1-e^{-x\theta}, \quad x\geq 0.$$
+Jest to przykładowo rozkład czasu między skokami w procesie Poissona z intensywnością $1/\theta$. Poprzez odwrócenie dystrybuanty uzyskamy możliwość stworzenia algorytmu do generowania próbek z rozkładu wykładniczego poprzez rozkład jednostajny
+$$X = -\frac{1}{\theta}\log{(1-U)},$$
+ale ponieważ $1-U$ ma taki sam rozkład jak $U$ możemy zapisać jako
+$$X = -\frac{1}{\theta}\log{(U)}.$$
+Generator stworzymy wykorzystując wcześniej stworzony generator liczb pseudolosowych z rozkładu jednostajnego. 
+
+```{r pseudo-r2, echo=TRUE}
+exp_rand <- function(N,theta,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if (check_assumptions(m,a,c) == 'Założenia spełnione!' & mode=="self"){
+    U <- lcgen(N,m,a,c,x)
+    X <- -1/theta*log(U)
+
+  }
+  else if (check_assumptions(m,a,c) != 'Założenia spełnione!' & mode=="self"){
+    print("Wartości dla założeń nieprawidłowe!")
+    U <- lcgen(N,m,a,c,x)
+    X <- -1/theta*log(U)
+
+  }
+  else {
+    U <- runif(N)
+    X <- -1/theta*log(U)
+  }
+  return(X)
+}
+
+```
+
+Stworzymy też funkcję generującą histogram wraz z funkcją gęstości oraz zwracającą podstawowe statystyki opisowe, czyli średnią, medianę, wariancję i odchylenie standardowe oraz wartości teoretyczne.
+
+```{r pseudo-r200, echo=TRUE}
+plot_and_check <- function(X, theta, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = 1/theta
+  median = log(2)/theta
+  var = 1/(theta^2)
+  std = sqrt(var)
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Wartości teoretyczne:")
+  print(paste("Średnia: ", mean, ", Mediana: ", median))
+  print(paste("Wariancja: ", var, ", STD: ", std))
+  print("Wartości wygenerowane:")
+  print(paste("Średnia: ", mean_x, ", Mediana: ", median_x))
+  print(paste("Wariancja: ", var_x, ", STD: ", std_x))
+  }
+```
+
+Sprawdźmy dla wartości nieprawidłowych
+
+```{r pseudo-r21, echo=TRUE}
+exp <- exp_rand(N=1000, theta=1, m=nonvalid[1], a=nonvalid[2], c=nonvalid[3], x=nonvalid[4])
+plot_and_check(exp, theta=1, "Rozkład wykładniczy - nieprawidłowe parametry")
+```
+
+Można bez problemu zauważyć absurdalne rezultaty przy braku spełnionych założeń dla generatora liczb z rozkładu jednostajnego. Co więcej, statystyki opisowe są znacząco różne od tych teoretycznych. Sprawdźmy generator dla wartości względnie poprawnych.
+
+```{r pseudo-r22, echo=TRUE}
+exp <- exp_rand(N=1000, theta=1, m=badvalid[1], a=badvalid[2], c=badvalid[3], x=badvalid[4])
+plot_and_check(exp, theta=1, title= "Rozkład wykładniczy - słaby dobór parametrów")
+```
+
+Widać poprawę wyników, ale występują niepożądane "pagórki". Co więcej, statystyki opisowe, choć bardziej zbliżone, to wciąż dość mocno odstają od wartości teoretycznych. Sprawdźmy dla wartości prawidłowych.
+
+```{r pseudo-r23, echo=TRUE}
+exp <- exp_rand(N=1000, theta=1, m=valid[1], a=valid[2], c=valid[3], x=valid[4])
+plot_and_check(exp, theta=1, title = "Rozkład wykładniczy - względnie dobry dobór parametrów")
+```
+
+Widzimy teraz, że "pagórki" zostały prawie całkowicie wyeliminowane i nasz rozkład przypomina rozkład wykładniczy. Dodatkowo, statystyki wygenerowane są mocno zbliżone do statystyk teoretycznych. Ewentualne mocniejsze odchylenia są widoczne przy wariancji. Przyrównajmy go z rozkładem wygenerowanym za pomocą generatora wbudowanego.
+
+```{r pseudo-r231, echo=TRUE}
+exp <- rexp(1000, rate=1)
+plot_and_check(exp, theta=1, title="Rozkład wykładniczy z generatora wbudowanego")
+```
+
+Możemy zauważyć, że wbudowany generator radzi sobie podobnie. Również statystyki wygenerowane w niewielki sposób są odchylone od teoretycznych. Jednak należy zauważyć, że odpowiednio dobrane parametry dla generatora liniowej kongruencji są kluczowe. W przypadku dobrania takich niespełniających założeń lub o zbyt małej "losowości" nasze wyniki nie będą satysfakcjonujące, więc powinniśmy zwracać uwagę na dobranie takich parametrów dla których uzyskana losowość będzie wystarczająca do wygenerowania próbki pseudolosowej pochodzącej z innej rodziny rozkładów. Sprawdźmy wyniki dla innych parametrów $\theta$, w tym dla $\theta = 3/2$.
+
+```{r pseudo-r26, echo=TRUE}
+exp6 <- exp_rand(N=1000, theta=3/2, mode="implemented")
+plot_and_check(exp6, theta=3/2, title = "Rozkład wykładniczy theta = 3/2")
+```
+```{r pseudo-r27, echo=TRUE}
+exp7 <- rexp(1000, rate=3/2)
+plot_and_check(exp7, theta=3/2, title= "Rozkład wykładniczy dla wbudowanego generatora theta = 3/2")
+```
+
+Jak można zauważyć, obydwa generatory są względnie dobrymi generatorami. Statystyki opisowe dla wygenerowanych wektorów są zbliżone do wartości teoretycznych nawet przy zmianie parametru. Stworzyliśmy więc generator liczb z rozkładu wykładniczego przy pomocy zaimplementowanego wcześniej generatora liczb pseudolosowych z rozkładu jednostajnego. Przejdźmy do kolejnego rozkładu.
+
+## Rozkład Weibulla
+Rozkład Weibulla o parametrach $\theta$ oraz $k$ ma dystrybuantę
+$$F(x) = 1-e^{-(x/\theta)^k}, \quad x\geq 0.$$
+W zależności od doboru $k$ możemy tak naprawdę otrzymać rozkład wykładniczy ($k=1$), czy też Rayleigha ($k=2$) a nawet rozkład normalny (dla dużych $k$). Poprzez odwrócenie dystrybuanty uzyskamy możliwość stworzenia algorytmu do generowania próbek z rozkładu Weibulla poprzez rozkład jednostajny
+$$X = |\theta|(-\log{(1-U)})^{1/k},$$
+ale ponieważ $1-U$ ma taki sam rozkład jak $U$ możemy zapisać jako
+$$X = |\theta|(-\log{(U)})^{1/k}.$$
+Generator stworzymy wykorzystując wcześniej stworzony generator liczb pseudolosowych z rozkładu jednostajnego. 
+
+```{r pseudo-r3, echo=TRUE}
+weibull_rand <- function(N,theta,k,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if (check_assumptions(m,a,c) == 'Założenia spełnione!' & mode=="self"){
+    U <- lcgen(N,m,a,c,x)
+    X <- abs(theta)*(-log(U))^(1/k)
+
+  }
+  else if (check_assumptions(m,a,c) != 'Założenia spełnione!' & mode=="self"){
+    print("Wartości dla założeń nieprawidłowe!")
+    U <- lcgen(N,m,a,c,x)
+    X <- abs(theta)*(-log(U))^(1/k)
+
+  }
+  else {
+    U <- runif(N)
+    X <- abs(theta)*(-log(U))^(1/k)
+
+  }
+  return(X)
+}
+
+```
+
+Stworzymy też funkcję generującą histogram wraz z funkcją gęstości oraz zwracającą podstawowe statystyki opisowe, czyli średnią, medianę, wariancję i odchylenie standardowe oraz wartości teoretyczne.
+
+```{r pseudo-r300, echo=TRUE}
+plot_and_check_weibull <- function(X, theta, k, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = theta*gamma(1+1/k)
+  median = theta*log(2)^(1/k)
+  var = theta^2 * gamma(1+2/k) - (theta*gamma(1+1/k))^2
+  std = sqrt(var)
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Wartości teoretyczne:")
+  print(paste("Średnia: ", mean, ", Mediana: ", median))
+  print(paste("Wariancja: ", var, ", STD: ", std))
+  print("Wartości wygenerowane:")
+  print(paste("Średnia: ", mean_x, ", Mediana: ", median_x))
+  print(paste("Wariancja: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Sprawdźmy dla wartości nieprawidłowych
+
+```{r pseudo-r31, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=1, k=1, m=nonvalid[1], a=nonvalid[2], c=nonvalid[3], x=nonvalid[4])
+plot_and_check_weibull(weib, theta=1, k =1, title = "Rozkład Weibulla (k=1 - wykładniczy) - nieprawidłowe parametry")
+```
+
+Widać bez problemu identyczne rezultaty, jak w przypadku generatora rozkładu Wykładniczego. Otrzymane rezultaty również są nieprawidłowe, a statystyki znacząco się różnią. Sprawdźmy generator dla wartości względnie poprawnych.
+
+```{r pseudo-r32, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=1, k =1, m=badvalid[1], a=badvalid[2], c=badvalid[3], x=badvalid[4])
+plot_and_check_weibull(weib, theta=1, k=1, title= "Rozkład Weibulla (k=1) - słaby dobór parametrów")
+```
+
+Ponownie widać poprawę wyników, ale tutaj także z "pagórkami". Sprawdźmy dla wartości prawidłowych.
+
+```{r pseudo-r33, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=1, k=1, m=valid[1], a=valid[2], c=valid[3], x=valid[4])
+plot_and_check_weibull(weib, theta=1, k=1, title = "Rozkład Weibulla (k=1) - względnie dobry dobór parametrów")
+```
+
+Widzimy teraz, że "pagórki" zostały prawie całkowicie wyeliminowane i nasz rozkład przypomina rozkład wykładniczy (tak powinno wychodzić przy $k=1$). Dodatkowo, statystyki wygenerowane są mocno zbliżone do statystyk teoretycznych. Pokazaliśmy już, zarówno w poprzednim raporcie, jak też w tym na dwóch przykładach, że odpowiedni dobór parametrów dla generatora liniowej kongruencji jest niezbędny, aby uzyskać satysfakcjonujące rezultaty - w końcu to na nich opieramy nasze kolejne generatory. W celu zredukowania ilości tekstu, pomijać w dalszej części będziemy testowanie na błędnych parametrach z racji, iż pokazane już została ich istotność. Co więcej, jak zostało wspomniane w poprzednim raporcie, w przypadku użycia generatora liczb pseudolosowych z rozkładu jednostajnego nie ma potrzeby doboru odpowiednich parametrów. Uwzględniając to, jak również fakt, że do naszego generatora z rozkładu jednostajnego moglibyśmy dobrać zapewne jeszcze lepsze wartości parametrów, dalej korzystać będziemy z generatora wbudowanego dla liczb z rozkładu jednostajnego. Takie podejście zapewni najrzetelniejsze odzwierciedlenie pseudolosowości. Specjalnie na taki przypadek został w każdej funkcji zaimplementowany parametr "mode" zezwalający na wybór generatora. Sprawdźmy teraz wartości dla innych parametrów $k$ oraz $\theta$ i przyrównajmy go z rozkładem wygenerowanym za pomocą generatora wbudowanego.
+
+```{r pseudo-r3433, echo=TRUE}
+exp <- rweibull(1000, scale=1, shape=1)
+plot_and_check_weibull(exp, theta=1, k=1,title="Rozkład Weibulla z generatora wbudowanego (dla k=1)")
+```
+
+Możemy zauważyć, że wbudowany generator radzi sobie podobnie. Również statystyki wygenerowane w niewielki sposób są odchylone od teoretycznych. Zupełnie jak w przypadku rozkładu wykładniczego, jest to ważna informacja, gdyż mówi nam o poprawnym sposobie budowania generatora rozkładu Weibulla - przy takim doborze parametru $k$ dokładnie rozkład wykładniczy jest pożądany.
+Sprawdźmy wyniki dla innych parametrów $\theta$ i $k$, w tym dla $\theta = 2$ oraz $k=2$ (rozkład Rayleigha).
+
+```{r pseudo-r35, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=2, k=2, mode="implemented")
+plot_and_check_weibull(weib, theta=2, k=2, title = "Rozkład Weibulla (k=2) theta = 2")
+```
+```{r pseudo-r34, echo=TRUE}
+w2 <- rweibull(1000, scale=2, shape=2)
+plot_and_check_weibull(w2, theta=2, k=2,title="Rozkład Weibulla z generatora wbudowanego (dla k=2)")
+```
+
+Otrzymaliśmy ponownie bardzo zbliżone wyniki. Wizualizacja rozkładów (za pomocą generatora wbudowanego oraz własnego) pokazuje jak zbliżone są do siebie. Jednak to statystyki są tutaj kluczowe i najrzetelniejsze, a wartości są niewiele odstające od wartości teoretycznych. Można wywnioskować, że stworzony przez nas generator całkiem dobrze sobie radzi w porównaniu do generatora wbudowanego. 
+
+## Rozkład arcusa sinusa
+Rozkład arcusa sinusa modeluje czas, w którym ruch Browna osiąga swoje maksimum na przedziale $[0,1]$ i wyrazić go można dystrybuantą
+$$F(x) = \frac{2}{\pi}\arcsin(\sqrt{x}), \quad x\in [0,1].$$
+Poprzez odwrócenie dystrybuanty uzyskamy możliwość stworzenia algorytmu do generowania próbek z rozkładu arcusa sinusa poprzez rozkład jednostajny
+$$X = \sin^2(U\pi/2),$$
+ale ponieważ możemy skorzystać z własności $2\sin^2(t)=1-\cos(2t)$ to wówczas
+$$X = \frac{1}{2} - \frac{1}{2}\cos(U\pi).$$
+Generator stworzymy, ponownie, wykorzystując wcześniej stworzony generator liczb pseudolosowych z rozkładu jednostajnego. 
+
+```{r pseudo-r4, echo=TRUE}
+arcsin_rand <- function(N,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if (check_assumptions(m,a,c) == 'Założenia spełnione!' & mode=="self"){
+    U <- lcgen(N,m,a,c,x)
+    X <- 1/2 - 1/2*cos(U*pi)
+  }
+  else if (check_assumptions(m,a,c) != 'Założenia spełnione!' & mode=="self"){
+    print("Wartości dla założeń nieprawidłowe!")
+    U <- lcgen(N,m,a,c,x)
+    X <- 1/2 - 1/2*cos(U*pi)
+  } else {
+    U <- runif(N)
+    X <- 1/2 - 1/2*cos(U*pi)
+    
+  }
+  return(X)
+}
+
+```
+
+Stworzymy też, jeszcze raz dla nowego rozkładu, funkcję generującą histogram wraz z funkcją gęstości oraz zwracającą podstawowe statystyki opisowe, czyli średnią, medianę, wariancję i odchylenie standardowe oraz wartości teoretyczne.
+
+```{r pseudo-r400, echo=TRUE}
+plot_and_check_arcsin <- function(X, theta, k, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = 1/2
+  median = 1/2
+  var = 1/8
+  std = sqrt(var)
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Wartości teoretyczne:")
+  print(paste("Średnia: ", mean, ", Mediana: ", median))
+  print(paste("Wariancja: ", var, ", STD: ", std))
+  print("Wartości wygenerowane:")
+  print(paste("Średnia: ", mean_x, ", Mediana: ", median_x))
+  print(paste("Wariancja: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Wygenerujmy pewną próbkę i porównajmy wartości statystyk do wartości teoretycznych.
+
+```{r pseudo-r4111, echo=TRUE}
+arc <- arcsin_rand(N=1000, mode="implemented")
+plot_and_check_arcsin(arc, title = "Rozkład arcus sinus N=1000")
+```
+
+Są pewne odchylenia w statystykach, ale wartości wyglądają rozsądnie i są zbliżone do teoretycznych. Sprawdźmy z ciekawości sytuację dla mniejszej próbki $N=100$.
+
+```{r pseudo-r42321, echo=TRUE}
+arc <- arcsin_rand(N=10, mode="implemented")
+plot_and_check_arcsin(arc, title = "Rozkład arcus sinus N=10")
+```
+
+Teraz widzimy już znaczne odchylenia, ale jest to spodziewana sytuacja. Sprawdźmy dla większej próbki $N=10000$.
+
+```{r pseudo-r41, echo=TRUE}
+arc <- arcsin_rand(N=10000, mode="implemented")
+plot_and_check_arcsin(arc, title = "Rozkład arcus sinus N=10000")
+```
+
+Wartości są niemal tej samej wartości. Generator osiąga świetne wyniki, jednak nie udało mi się znaleźć wbudowanego generatora tego rozkładu, do którego można by było dodatkowo zestawić otrzymane rezultaty. Przejdźmy więc do kolejnego generatora liczb z rozkładu normalnego. 
+
+## Rozkład normalny
+Do generowania liczb z rozkładu normalnego zastosujemy dwa podejścia. Pierwsze będzie zaimplementowane przy użyciu podwójnego wykładniczego. W tym celu zauważmy, że gęstość podwójnego rozkładu wykładniczego na prostej $(-\infty, +\infty)$ wynosi 
+$$g(x) = e^{-|x|}/2$$
+natomiast gęstość rozkładu normalnego jest równa
+$$f(x) = e^{-x^2/2}/\sqrt{2\pi}.$$
+Stosunek jest następujący
+$$\frac{f(x)}{g(x)} = \sqrt{\frac{2}{\pi}}e^{-\frac{1}{2}x^2 + |x|} \leq \sqrt{\frac{2e}{\pi}} \approx 1.3155 \equiv c.$$
+Stąd, gęstość rozkładu normalnego jest zdominowana przez zeskalowaną gęstość podwójnego rozkładu wykładniczego $cg(x)$. Próbkę z podwójnego rozkładu wykładniczego jesteśmy w stanie wygenerować wykorzystując wcześniej stworzony generator i losując z niego pewien zestaw wartości a następnie ustalając losowo znak. Z kolei test odrzucający próbkę $u > f(x)/cg(x)$ można zaimplementować następująco
+$$u > e^{\frac{1}{2}x^2 + |x| - \frac{1}{2}} = e^{-\frac{1}{2}(|x| - 1)^2}.$$
+W kontekście symetrii obu gęstości $f$ oraz $g$, ważne jest aby wygenerować pozytywną próbkę i ustalić znak tylko wtedy, gdy zostanie ona zaakceptowana. W takim wypadku, wartość absolutna jest niepotrzebna w teście odrzucającym. Ostatecznie algorytm prezentuje się następująco:
+
+```{r pseudo-r6, echo=TRUE}
+normal_double <- function(N,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if ((check_assumptions(m,a,c) == 'Założenia spełnione!' & mode == "self") | mode != "self"){
+    X <- c()
+    i <- 0
+    while(length(X) < N){
+      i <- i+1
+      if (mode == "self"){
+        U <- lcgen(4,m,a,c,x+i)
+      } else {
+        U <- runif(4)
+      }    
+      U1 <- U[2]
+      U2 <- U[3]
+      U3 <- U[4]
+      
+      tmp <- -log(U1)
+      if (U2 > exp(-0.5*(tmp-1)^2)){
+        next
+      }else if (U3 <= 0.5){
+        tmp <- -tmp
+      }  
+      
+      X <- append(X,tmp)
+    }
+    return(X)
+    }else{
+      print("Wartości dla założeń nieprawidłowe!")
+      return(0)
+    }
+  }
+```
+
+Dodatkowo tworzymy funkcję do wykreślania otrzymanych wyników wraz z zestawieniem statystyk opisowych otrzymanych z próbki ze statystykami teoretycznymi dla rozkładu normalnego.
+
+```{r pseudo-r600, echo=TRUE}
+plot_and_check_normal <- function(X, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = 0
+  median = 0
+  var = 1
+  std = 1
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Wartości teoretyczne:")
+  print(paste("Średnia: ", mean, ", Mediana: ", median))
+  print(paste("Wariancja: ", var, ", STD: ", std))
+  print("Wartości wygenerowane:")
+  print(paste("Średnia: ", mean_x, ", Mediana: ", median_x))
+  print(paste("Wariancja: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Sprawdźmy nasz generator.
+
+```{r pseudo-r61, echo=TRUE}
+nor <- normal_double(N=1000, mode="implemented")
+plot_and_check_normal(nor, title = "Standardowy rozkład normalny generowany metodą podwójnego wykładniczego")
+```
+
+Możemy zauważyć, że rzeczywiście przypomina on standardowy rozkład normalny. Co więcej, otrzymane statystyki opisowe nie odchylają się zbytnio od statystyk teoretycznych. Przyrównajmy go jeszcze do generatora wbudowanego.
+
+```{r pseudo-r62, echo=TRUE}
+nor <- rnorm(n=1000)
+plot_and_check_normal(nor, title = "Standardowy rozkład normalny generowany przez generator wbudowany")
+```
+
+Co ciekawe, przy liczebności próbki $N=1000$ nasz generator podwójny wykładniczy osiągnął nawet bliższe wartości statystyk opisowych (statystykom teoretycznym), aniżeli generator wbudowany. Można by wnioskować, iż jest on generatorem dokładniejszym. Przejdźmy jednak do drugiej metody jaką jest metoda Boxa-Mullera. Metoda ta jest jedną z prostszych do zaimplementowania (jednak nie najszybszą). Generuje ona próbkę z dwuwymiarowego standardowego rozkładu normalnego, gdzie każdy z poszczególnych wymiarów jest oczywiście z jednowymiarowego rozkładu normalnego. Algorytm ten opiera się na dwóch następujących własnościach dwuwymiarowego rozkładu normalnego. Dokładniej mówiąc, jeżeli $Z \sim N(0, I_2)$ to 
+1. $R = Z_{1}^{2} + Z_{2}^{2}$ ma rozkład wykładniczy o średniej $2$, tj.
+$$P(R \leq x) = 1 - e^{-x/2}.$$
+2. mając dane $R$, punkt $(Z_1,Z_2)$ ma rozkład jednostajny na okręgu o promieniu $\sqrt{R}$ i wyśrodkowanym w początku układu współrzędnych.
+
+Zatem w celu wygenerowania dwuwymiarowego standardowego rozkładu normalnego $(Z_1, Z_2)$ najpierw chcemy wygenerować $R$, a później wybrać punkt z rozkładu jednostajnego na okręgu o promieniu $\sqrt{R}$. W celu próbkowania z rozkładu wykładniczego możemy ustalić $R = -2\log(U_1)$, gdzie $U_1 \sim U[0,1]$. Natomiast, aby wygenerować punkt z okręgu, można wylosować jednostajnie kąt zawarty między $[0, 2\pi]$ i zmapować go jako punkt na tym okręgu. Taki kąt można wygenerować poprzez $V = 2\pi U_2$, gdzie $U_2 \sim U[0,1]$. Wówczas odpowiadający punkt temu kątowi ma współrzędne $(\sqrt{R}\cos(V), \sqrt{R}\sin(V))$. Implementacja algorytmu wygląda następująco.
+
+```{r pseudo-r8, echo=TRUE}
+normal_box <- function(N,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if ((check_assumptions(m,a,c) == 'Założenia spełnione!' & mode == "self") | mode != "self"){
+    X <- c()
+    i <- 0
+    while(length(X) < N){
+      i <- i+1
+      if (mode=="self"){
+        U <- lcgen(3,m,a,c,x+i)
+      } else{
+        U <- runif(3)
+      }    
+      U1 <- U[2]
+      U2 <- U[3]
+      R <- -2*log(U1)
+      V <- 2*pi*U2
+      
+      Z1 <- sqrt(R)*cos(V)
+      Z2 <- sqrt(R)*sin(V)
+      
+      
+      X <- append(X,c(Z1,Z2))
+    }
+    return(X)
+    }else{
+      print("Wartości dla założeń nieprawidłowe!")
+      return(0)
+    }
+  }
+```
+```{r pseudo-r82, echo=TRUE}
+box <- normal_box(N=1000, mode="implemented")
+plot_and_check_normal(box, title = "Standardowy rozkład normalny generowany metodą Boxa-Mullera")
+```
+
+Jak widzimy, wartości również są całkiem przyzwoite, ale już niewiele gorsze (względem statystyk opisowych) od generatora wbudowanego. Wizualnie możemy zauważyć w jakim stopniu algorytm ten przybliża standardowy rozkład normalny. Tym sposobem zaimplementowaliśmy generator liczb pseudolosowych ze standardowego rozkładu normalnego przy użyciu dwóch metod - metody podwójnej wykładniczej oraz Boxa-Mullera. Naszym kolejnym i ostatnim krokiem przy generatorach liczb pseudolosowych będzie generator z rozkładu Poissona.
+
+## Rozkład Poissona
+Rozkład Poissona o średniej $\theta >0$ dany jest wzorem
+$$ P(N=k) = e^{-\theta}\frac{\theta^k}{k!}, \quad k=1,2,3,...$$
+Oznaczamy to pisząc $N\sim Poisson(\theta)$. Jest to rozkład ilości zdarzeń w przedziale $[0,1]$ gdy czasy pomiędzy poszczególnymi wydarzeniami są niezależne oraz mają rozkład wykładniczy ze średnią $1/\theta$. Wówczas, prosta metoda generowania liczb pseudolosowych z rozkładu Poissona polega na generowaniu wykładniczych zmiennych losowych $X_i = -log(U_i)/\theta$ z niezależnych rozkładów jednostajnych $U_i$, a następnie wzięciu $N$ jako największej liczby całkowitej dla której $X_1 + ... + X_N \leq 1$. Metoda ta jednak jest raczej powolna, szczególnie jeśli $\theta$ jest duże. Jest więc metoda alternatywna korzystająca z metody odwróconej transformacji. Dla dyskretnych rozkładów, sprowadza się ona do sekwencyjnego poszukiwania najmniejszych $n$, w których $F(n) \leq U$, gdzie $F$ oznacza dystrybuantę oraz $U\sim U[0,1]$. W przypadku rozkładu Poissona, $F(n)$ jest obliczana jako $P(N=0) + ... + P(N = n)$. Raczej, zamiast liczenia każdego z poszczególnych wyrażeń, można skorzystać z relacji $P(N = k+1) = P(N=k)\theta / (k+1)$. Implementacja algorytmu wygląda następująco.
+
+```{r pseudo-r9, echo=TRUE}
+poisson <- function(N,theta,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if ((check_assumptions(m,a,c) == 'Założenia spełnione!' & mode == "self") | mode != "self"){
+    X <- c()
+    i <- 0
+    while(length(X) < N){
+      p <- exp(-theta)
+      Fd <- p
+      Nbig <- 0
+      
+      i <- i+1
+      if (mode == "self"){
+        U <- lcgen(2,m,a,c,x+i)
+      }else{
+        U <- runif(2)
+      }      
+      U1 <- U[2]
+      while (U1 > Fd){
+        Nbig <- Nbig + 1
+        p <- p*theta/Nbig
+        Fd <- Fd + p
+        }
+      X <- append(X,Nbig)
+      }
+    return(X)
+    }else{
+      print("Wartości dla założeń nieprawidłowe!")
+      return(0)
+    }
+}
+```
+```{r pseudo-r900, echo=TRUE}
+plot_and_check_poiss <- function(X, theta,title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = theta
+  median = (theta + 1/3 - 0.02/theta)
+  var = theta
+  std = 1
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Wartości teoretyczne:")
+  print(paste("Średnia: ", mean, ", Mediana: ", median))
+  print(paste("Wariancja: ", var, ", STD: ", std))
+  print("Wartości wygenerowane:")
+  print(paste("Średnia: ", mean_x, ", Mediana: ", median_x))
+  print(paste("Wariancja: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Sprawdźmy teraz wygenerowane wartości dla $\theta =1$ oraz próbki $N=1000$. 
+
+```{r pseudo-r91, echo=TRUE}
+pois <- poisson(N=1000,theta=1, mode="implemented")
+plot_and_check_poiss(pois, theta=1, title = "Rozkład Poissona z theta=1 dla N=1000")
+```
+
+Porównanie statystyk opisowych z próbki, a teoretycznych wygląda bardzo dobrze. Wartości nie odstają od siebie za bardzo. Wykres funkcji gęstości prawdopodobieństwa wraz z histogramem na pierwszy rzut oka może wyglądać niezbyt obiecująco, ale należy pamiętać że modelujemy tutaj ilość zdarzeń w pewnym czasie. Dla pewności przyrównajmy do próbki wygenerowanej z generatora wbudowanego. 
+
+```{r pseudo-r92, echo=TRUE}
+pois <- rpois(1000,1)
+plot_and_check_poiss(pois, theta=1, title = "Rozkład Poissona z theta=1 dla N=1000")
+```
+
+Jak możemy dostrzec, wartości statystyk są nawet bardziej zbliżone w przypadku naszego generatora, niż dla generatora wbudowanego. Ponadto możemy zauważyć, że wykresy kształtują się w podobny sposób. Oznacza to, że nasz generator sprawuje się bardzo dobrze. Sprawdźmy go jeszcze dla innych parametrów $\theta$, aby spojrzeć jak wyglądają wówczas rozkłady Poissona.
+
+```{r pseudo-r93, echo=TRUE}
+pois <- poisson(N=1000,theta=2, mode="implemented")
+plot_and_check_poiss(pois, theta=2, title = "Rozkład Poissona z theta=1 dla N=1000")
+```
+```{r pseudo-r94, echo=TRUE}
+pois <- poisson(N=1000,theta=3, mode="implemented")
+plot_and_check_poiss(pois, theta=3, title = "Rozkład Poissona z theta=1 dla N=1000")
+```
+```{r pseudo-r95, echo=TRUE}
+pois <- poisson(N=1000,theta=4, mode="implemented")
+plot_and_check_poiss(pois, theta=4, title = "Rozkład Poissona z theta=1 dla N=1000")
+```
+
+Dla każdego z parametrów wartości statystyk są niezbyt odstające od wartości teoretycznych. Ciekawą rzeczą do zauważenia jest fakt, jak wraz ze wzrostem parametru $\theta$ zmienia się częstość występowania liczby zdarzeń. Przy odrobinie zastanowienia jest to sprawą oczywistą, gdyż parametr ten stanowi tak naprawdę wartość oczekiwaną, więc im wyższy tym największe skupisko będzie w wyższym punkcie. Tak też, dla $\theta =3$ największa częstość jest w punkcie $3$, a dla $\theta = 4$ w punkcie $4$. 
+Zbudowaliśmy właśnie solidny generator liczb pseudolosowych z rozkładu Poissona. Przejdźmy teraz do ostatniego punktu jakim jest rozwiązanie pewnego zadania korzystając z jednego z wbudowanych generatorów. 
+
+## Symulacja czasu działania sortowni
+W tym zadaniu brać pod uwagę będziemy uproszczoną wersję sortowni ubrań, której schemat działania można zilustrować następująco.
+
+![Układ sortowni](uklad.jpg)
+
+Przyjmijmy, że $1$ oznacza urządzenie składujące ubrania do sortowania i wpuszczające je na hale, w przypadku gdy będzie niesprawne, żadne ubrania nie zostaną wprowadzone, a więc i posortowane co spowoduje chwilowe zamknięcie sortowni. Z kolei $2$ oraz $3$ są oznaczeniem dla sortowników, działają równolegle, więc gdy jeden z nich ulegnie uszkodzeniu, drugi wciąż może pracować i sortownia w dalszym ciągu będzie działać. Natomiast gdy obydwa zepsują się jednocześnie to również spowoduje to zatrzymaniu prac. Ostatnim elementem jest $4$, która reprezentuje urządzenie składujące posortowane ubrania i wyprowadzające je z hali, również jest kluczowe bo jego zatrzymanie spowoduje zaprzestanie dostarczania posortowanych ubrań. Każde z tych urządzeń ma pewien swój "czas życia", który można zamodelować korzystając z odpowiednich rozkładów, a konkretniej mówiąc:
+
+a) urządzenie $1 \sim weibull(30,3)$,
+
+b) urządzenie $2 \sim exp(0.05)$,
+
+c) urządzenie $3 \sim exp(0.1)$,
+
+d) urządzenie $4 \sim weibull(50,2)$.
+
+Oznaczmy każdemu elementowi zmienną binarną $x_i$, gdzie $i \in \{1,2,3,4\}$ oznacza numer elementu, $x_i = 1$, gdy element jest zdatny oraz $x_i = 0$ gdy $i$-ty element jest niezdatny. Stworzymy też tzw. funkcje struktury $\phi(x) = x_1 \cdot ... \cdot x_n$ dla układów szeregowych oraz $\phi(x) = 1 - (1-x_1)\cdot...\cdot(1-x_n)$ dla układów równoległych, gdzie w naszym przypadku elementy $1$ jest połączony szeregowo z elementami $(2,3)$ oraz $4$, analogicznie $4$, natomiast elementy $(2,3)$ są połączone ze sobą równolegle, a ich połączenie równoległe jest połączeniem szeregowym z pozostałymi. Mówimy, że system jest zdatny, gdy $\phi(x)=1$ oraz niezdatny, gdy $\phi(x)=0$. Zatem w naszym przypadku mamy
+$$\phi(x) = x_1 \cdot (1 - (1-x_2)\cdot(1-x_3)) \cdot x_4 = x_1 \cdot (1 - 1 + x_3 +x_2 -x_2x_3) \cdot x_4 = x_1 \cdot (x_2 + x_3 - x_2x_3)\cdot x_4.$$
+Teraz oznaczmy przez $p_i = P(x_i = 1) = E(x_i)$, czyli jest to prawdopodobieństwo zdatności $i$-tego elementu w danej chwili. Uwzględniając niezależność naszych elementów możemy rozpisać niezawodność teoretyczną systemu następująco
+$$E(\phi(x)) = p_1 \cdot ( p_2 + p_3 - p_2p_3)\cdot  p_4.$$
+W celu dokonania symulacji czasu działania takiej sortowni dokonamy symulacji poprzez losowanie z zaimplementowanych przez nas generatorów oraz w celu sprawdzenia dokonamy także przeliczenia niezawodności teoretycznej wykorzystując wbudowane funkcje w programie R. Implementacja tego jest następująca.
+
+```{r pseudo-task, echo=TRUE}
+#---------------SYMULACJA CZASU DZIALANIA UKLADU------------------------
+#Niezawodnosc teoretyczna
+r <- function(t){
+  p1 = 1-pweibull(t,shape=3,scale=30)
+  p2 = 1-pexp(t,0.05)
+  p3 = 1-pexp(t,0.1)
+  p4 = 1-pweibull(t,shape=2,scale=50)
+
+  p1*(p2 + p3 - p2*p3)*p4
+}
+
+symulacja<-function(n){
+  z <- c()
+  x1 <- weibull_rand(N=n, theta=30,k=3, mode="implemented")
+  x2 <- exp_rand(N=n, theta=0.05, mode="implemented")
+  x3 <- exp_rand(N=n, theta=0.1, mode="implemented")
+  x4 <- weibull_rand(N=n, theta=50,k=2, mode="implemented")
+  
+  w <- c()
+  wx1 <- rweibull(n,shape=3,scale=30)
+  wx2 <- rexp(n,0.05)
+  wx3 <- rexp(n,0.1)
+  wx4 <- rweibull(n,shape=2,scale=50)
+  
+  
+  for(i in 1:n){
+    z[i]<- min(x1[i], max(x2[i],x3[i]),x4[i])
+    w[i]<- min(wx1[i], max(wx2[i],wx3[i]),wx4[i])
+  }
+  
+  #Srednia teoretyczna:
+  teor <- integrate(r,0,Inf)
+  print("Średnia teoretyczna: ")
+  print(teor)
+  #Z symulacji:
+  print("Średnia wartość empiryczna z generatorów własnych: ")
+  print(mean(z))
+  print("Średnia wartość empiryczna z generatorów wbudowanych: ")
+  print(mean(w))
+  hist(z, main='Histogram czasu zycia', ylab='czestotliwosc')
+
+}
+```
+
+Funkcja oprócz symulowania średniego czasu życia dodatkowo oblicza średnią wartość teoretyczną. Co więcej, szkicuje dystrybuantę empiryczną oraz teoretyczną, jak i sprawdza czy są one liniowo zależne poprzez stworzenie modelu liniowego. Sprawdźmy wyniki dla $n=100$.
+
+```{r pseudo-task2, echo=TRUE}
+symulacja(100)
+```
+
+Oraz dla bardziej liczebnej symulacji $n=10000$.
+
+```{r pseudo-task3, echo=TRUE}
+symulacja(10000)
+```
+
+Wartości teoretyczne oczywiście nie ulegają zmianom, ale pewne jest że liczebniejsza próbka oferuje większą stabilność modelu. Jak widać, zarówno przy pomocy generatorów własnych, jak też wbudowanych, uzyskane zostały wyniki bliskie teoretycznemu. Właśnie wyliczyliśmy teoretyczną średnią wartość czasu pracy sortowni, czyli ok. 15 dni. Dodatkowo, przygotowaliśmy symulację korzystając z generatorów liczb pseudolosowych z rozkładu wykładniczego i Weibulla (własnych jak i wbudowanych) przez którą pokazaliśmy słuszność wyniku teoretycznego. Ponadto jesteśmy w stanie dokonać wizualizacji przy pomocy histogramu, średniego czasu zdatności sortowni o takich urządzeniach, których czas pracy można wyrazić korzystając z owych rozkładów. 
+
+## Podsumowanie
+W tym raporcie wprowadzona została powierzchowna teoria dotycząca tworzeniu generatorów liczb pseudolosowych pochodzących z rozkładów takich jak rozkład wykładniczy, Weibulla, arcusa sinusa, normalny (dwoma metodami) oraz Poissona przy użyciu generatora liczb z rozkładu jednostajnego. Tutaj wzięliśmy zarówno własny generator liniowej kongruencji, jak również w dalszych rozważaniach, w celu ujednolicenia, generator wbudowany. Pokazaliśmy raz jeszcze istotność założeń generatora liniowej kongruencji i ich wpływ na wyniki przy poszczególnych, innych rozkładach. Większa część opierała się na metodzie transformacji odwrotnej, aczkolwiek też była część polegająca na przeprowadzeniu testu odrzucającego. Co więcej, zaprezentowany został także algorytm Boxa Mullera oraz metoda podwójna wykładnicza do generowania liczb ze standardowego rozkładu normalnego. Na końcu wykorzystano zbudowane generatory wykładnicze i Weibulla do wykonania zadania symulacji średniego czasu zdatności pewnej sortowni, którą pokrótce opisano we wstępie.

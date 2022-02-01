@@ -1,0 +1,381 @@
+---
+title: "Generator liczb pseudolosowych z rozkładu jednostajnego metodą liniowej kongruencji"
+author: "Szymon Pawłowski s176528"
+output: pdf_document
+---
+
+```{r linear-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Generator liczb pseudolosowych z rozkładu jednostajnego metodą liniowej kongruencji
+## Wprowadzenie
+Generatorem liczb pseudolosowych nazywamy procedurę generującą zmienne losowe 
+$U_1, U_2, ...$, takie że:
+
+1. $\forall_{i}\quad U_i \sim U(0,1)$,
+2. zmienne losowe $U_i$ są wzajemnie niezależne.
+
+Przy czym druga własność jest ważna z racji, iż implikuje brak korelacji pomiędzy wszystkimi parami zmiennych losowych oraz fakt, że zmienna losowa $U_i$ nie powinna być przewidywalna na podstawie pozostałych zmiennych losowych $U_1, ..., U_{i-1}$. 
+
+Taki generator liczb pseudolosowych dostarcza skończony ciąg liczb $u_1, u_2, ..., u_K$ na przedziale jednostkowym, który przeważnie są zależne od wartości parametrów generatora podanych przez użytkownika. Każdy taki ciąg stanowi zbiór możliwych wyników niezależnych zmiennych $U_1, ..., U_K$, przy czym niewielkie, względem $K$, podzbiory tych ciągów powinny być trudne do rozróżnienia od realizacji ciągu zmiennych losowych z rozkładu jednostajnego.
+
+Efektywny generator zwraca wartości, które są spójne z powyższymi warunkami (1) oraz (2). Przy odpowiednio dużym $K$, ułamek wygenerowanych wartości z podprzedziału jednostkowego powinien być w przybliżeniu równy długości tego podprzedziału. Co więcej, niezależność sugeruje, że nie powinien być dostrzegalny żaden wzorzec przy wykreślaniu wygenerowanych liczb.  
+
+## Przykładowy generator
+Jednym z przykładowych generatorów liczb pseudolosowych jest generator kongruencji liniowej. Można go wyrazić w następujący sposób
+$$x_{i+1} = ax_i \ mod(m),$$
+$$u_{i+1} = \frac{x_{i+1}}{m}.$$
+W tym przypadku parametr $a$ nazywany jest *mnożnikiem*, natomiast $m$ parametrem *modulo*. Są to stałe, które determinują generowane wartości przy podaniu dodatkowej wartości inicjacyjnej (*ziarna*) $x_0$. Ziarno jest liczbą całkowitą określoną przez użytkownika o wartości leżącej między $1$, a $m-1$.
+
+Operacja $y \ mod(m)$ możemy zapisać w inny sposób
+$$y \ mod(m) = y - \lfloor \frac{y}{m} \rfloor \space m,$$
+gdzie $\lfloor x \rfloor$ jest najwyższą liczbą całkowitą mniejszą bądź równą $x$. Jak można zauważyć, operacja modulo zawsze zwróci wartość między $0$, a $m-1$. Stąd zwracane przez generator wartości $u_i$ zawsze będą leżały pomiędzy $0$, a $(m-1)/m$, a w szczególności, będą leżały na przedziale jednostkowym. 
+
+Należy także zwrócić uwagę na termin *pełnego okresu*. Liniowy generator kongruencji osiąga pełny okres, gdy zwraca $m-1$ różnych wartości przed powtórzeniem jakiejkolwiek z nich. W praktyce oczekuje się wygenerowania ogromnej liczby różnych wartości (np. $10$ mln) przed wystąpieniem jakiekolwiek powtórzenia. Aby uzyskać taki rezultat, **nie wystarczy** ustawić parametr $m$ o wysokiej wartości, ponieważ słabe dobranie parametru $a$ może spowodować wygenerowanie liczb o krótkich okresach. 
+
+## Ogólne zasady konstrukcji generatora liczb pseudolosowych
+Przy konstrukcji generatora liczb pseudolosowych należy rozważyć następujące aspekty:
+
+1. **Długość okresu**, a więc czas do powtórzenia wartości. Z reguły im dłuższy okres tym lepiej, a więc oczekuje się generatora, który wyprodukuje jak najwięcej różnych wartości przed wystąpieniem powtórzenia. Dla generatora liniowej kongruencji z modulo $m$ okres wynosi $m-1$. Taki generator osiąga **pełny okres**, gdy odstępy między poszczególnymi wartościami $u_i$ są długości $1/m$, więc im wyższa wartość $m$ tym bardziej wygenerowane wartości będą przybliżały rozkład jednostajny.
+2. **Reprodukowalność**, gdyż istotnym jest często możliwość odtworzenia symulacji przy użyciu tych samych parametrów i uzyskaniu takich samych wartości. W przypadku generatora liniowej kongruencji (lub innego w ogólnej postaci) otrzymujemy taki efekt ustawiając ziarno $x_0$. 
+3. **Prędkość**, ponieważ generator liczb pseudolosowych może mieć za zadanie wyprodukowanie tysiące bądź więcej wartości w pojedynczej symulacji należy zadbać o czas procesowania takiej sytuacji.
+4. **Przenośność** czyli produkowanie takich samych ciągów wygenerowanych wartości na wszystkich platformach komputerowych. W przypadku generatora liniowej kongruencji występuje niekiedy problem z różnym podejściem do zaokrąglania wartości przez co można uzyskać odmienne rezultaty.
+5. **Losowość** jest najważniejszym aspektem, który jest najtrudniejszy do zapewnienia. W praktyce do zapewnienia losowości stosuje się dwa podejścia: teoretyczne własności oraz testy statystyczne.
+
+## Generator kongruencji liniowej
+Generator kongruencji liniowej można przedstawić w ogólnej postaci
+$$x_{i+1} = (ax_i + c) \ mod(m)$$
+$$u_{i+1} = x_{i+1}/m$$.
+Przy czym wartości $a$, $m$ oraz $c$ muszą być liczbami całkowitymi. Co więcej, istnieją pewne warunki, które zapewniają o pełnej okresowości generatora (czyli sytuacji, gdy z dowolnego ziarna $x_o$ ilość różnych wartości wygenerowanych wynosi $m-1$). Tak więc, gdy $c \neq 0$ należy aby:
+
+1. $c$ i $m$ były relatywnie pierwsze, a więc aby ich największym wspólnym dzielnikiem było $1$;
+2. każda pierwsza liczba, która dzieli $m$, dzieliła również $a-1$;
+3. liczba $a-1$ była podzielna przez $4$, jeśli $m$ jest.
+
+Powyższe warunki implikują fakt, że jeśli $m$ jest pewną potęgą $2$ to generator ma pełny okres, gdy $c$ jest nieparzyste oraz $a=4n + 1$ dla pewnej liczby całkowitej $n$.
+
+Z drugiej strony, gdy $c=0$ i $m$ jest liczbą pierwszą, pełen okres jest osiągnięty z dowolnego $x_0$, jeśli:
+
+1. $a^{m-1} - 1$ nie jest wielokrotnością $m$;
+2. $a^j - 1$ nie jest wielokrotnością $m$ dla $j = 1, ..., m-2$.
+
+Taką liczbę $a$ nazywamy **pierwiastkiem pierwotnym** liczby $m$. 
+Można zauważyć, że w takim wypadku ciąg $\{x_i\}$ przybiera postać 
+$$x_0,\ ax_0,\ a^2x_0, \ a^3x_0,\ ..., \ (mod(m)).$$
+Wówczas, gdy $x_0 \neq 0$ to wszystkie wyrazy $x_i$ również są niezerowe. Co więcej, generator z parametrem $c \neq 0$ jest wolniejszy od tego z parametrem zerowym, więc zwyczajowo przyjmuje się parametr $c=0$. Wówczas należy dobrać za $m$ liczbę pierwszą, aby umożliwić konstrukcje generatora o pełnym okresie, poprzez proste znalezienie pierwiastków pierwotnych $m$. 
+
+Poniżej przykładowa funkcja przyjmująca postać generatora liniowej kongruencji, gdzie parametr $n$ określa długość wektora wygenerowanych wartości, a pozostałe parametry są analogiczne do tych przedstawionych w teorii. 
+
+```{r linear-func, echo=TRUE}
+lcgen <- function(n, m, a, c, x){
+  
+  gen <- vector(length = n)
+  
+  for (i in 1:n){
+    x <- (a * x + c) %% m
+    gen[i] <- x/m
+  }
+  
+  return(gen)
+}
+```
+
+Sprawdźmy działanie zaimplementowanego generatora dla pewnych, niewielkich wartości trzymając się podanych założeń. Aby ułatwić ich sprawdzanie zaimplementujemy dodatkowe funkcje, w tym:
+
+1. funkcja sprawdzająca czy pewne dwie liczby są względnie pierwsze:
+
+```{r linear-func2, echo=TRUE}
+gcd <- function(x,y) {
+  r <- x%%y;
+  return(ifelse(r, gcd(y, r), y))
+}
+```
+
+2. funkcja sprawdzająca czy każda pierwsza liczba dzieląca pewną liczbę $x$, dzieli także $y$:
+
+```{r linear-func3, echo=TRUE}
+prime_division <- function(x,y){
+  is_prime <- function(n) n == 2L || all(n %% 2L:max(2,floor(sqrt(n))) != 0)
+  
+  div <- c(1:(y-1))
+  divisors <- div[x %% div == 0]
+  
+  primes <- c()
+  for (i in 1:length(divisors)){
+    if (is_prime(divisors[i])==TRUE){
+      if ((y-1) %% divisors[i] == 0){
+        
+        primes <- c(primes, TRUE)
+      
+      } else {
+        print(divisors[i])
+        primes <- c(primes, FALSE)
+      }
+    }
+  }
+  return(primes)
+  
+ 1092 %% 2
+}
+
+```
+
+3. funkcja sprawdzająca podzielność przez $4$:
+
+```{r linear-func4, echo=TRUE}
+four_division <- function(x,y){
+  if (((x %% 4 == 0) & ((y-1) %% 4 == 0)) | ((x %% 4 != 0) & ((y-1) %% 4 != 0))){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+```
+
+4. funkcja sprawdzająca czy dana liczba $x$ nie jest wielokrotnością liczby $y$:
+
+```{r linear-func5, echo=TRUE}
+multiplication <- function(x,y){
+  if (y %% (x^(y-1)) != 0){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+```
+
+5. funkcja sprawdzająca czy dana liczba $x$ nie jest wielokrotnością liczby $y$ dla różnych wartości wykładników potęg:
+
+```{r linear-func6, echo=TRUE}
+multi_multiplication <- function(x,y){
+  info <- c()
+  for (i in 1:(x-2)){
+    if (y %% (x^i - 1) == 0){
+      info <- c(info, FALSE)
+    } else {
+      info <- c(info, TRUE)
+    }
+  }
+  return(info)
+}
+
+```
+
+Przy ich użyciu konstruujemy ogólną funkcję sprawdzającą poprawność założeń.
+
+```{r linear-func7, echo=TRUE}
+check_assumptions <- function(m,a,c){
+  if (c != 0){
+    if (gcd(c,m) == 1){
+      if (all(prime_division(m, a))==TRUE){
+        if (four_division(m, a)==TRUE){
+          return("Założenia spełnione!")
+        }
+        else{
+          return("Błąd! Liczba m podzielna przez 4, ale (a-1) nie jest!")
+        }
+      } else {
+        return("Błąd! Nie każda pierwsza liczba dzieląca m dzieli też a-1!")
+      }
+    } else {
+      return("Błąd! Liczby c i m nie są względnie pierwsze!")
+    }
+  } else if (c == 0){
+    if (multiplication(m, a)==TRUE){
+      if (all(multi_multiplication(m,a))==TRUE){
+        return("Założenia spełnione!")
+      } else {
+        return("Błąd! Liczba a^j - 1 jest wielokrotnością m dla pewnego j!")
+      }
+    } else {
+      return("Błąd! Liczba a^(m-1) jest wielokrotnością m!")
+    }
+  } else {
+    return("Przypadek nie został obsłużony!")
+  }
+}
+```
+
+Mając zdefiniowane narzędzia do sprawdzania poprawności założeń możemy przetestować generator dla pewnych wartości. Rozpocznijmy od generowania $n=50$ wartości przy ziarnie $x_0=1$ z przyjętymi parametrami
+$$ m = 53, \quad a = 20, \quad c = 0.$$
+
+```{r linear-test1, echo=TRUE}
+check_assumptions(m=53, a=20, c=0)
+```
+
+Widzimy, że przyjęte parametry spełniają założenia, więc teraz wygenerujmy parę liczb.
+
+```{r linear-test1.1, echo=TRUE}
+lcgen(50, 53, 20, 0, 1)
+```
+
+Rzeczywiście otrzymaliśmy wygenerowane wartości z przedziału jednostkowego, które się nie powtarzają. Zgodnie z przedstawioną teorią, zmiana $n$ na $n=53$ powinna ukazać nam już pierwsze powtórzenie, jako że założenia pełnej okresowości zostały spełnione.
+
+```{r linear-test1.3, echo=TRUE}
+lcgen(53, 53, 20, 0, 1)
+```
+
+Jak widać, ostatnia wartość jest już kolejną iteracją całego okresu. Sprawdźmy działanie dla jeszcze mniejszych wartości, wybierając
+$$m=7, \quad a=2, \quad c=0.$$
+
+```{r linear-test2, echo=TRUE}
+check_assumptions(m=7, a=2, c=0)
+lcgen(50, 7, 2, 0, 1)
+```
+
+Przy takich wartościach parametrów okres oczywiście ma o wiele mniejszą długość, zatem ilość powtórzeń przy $50$ wygenerowanych wartościach będzie większa. Sprawdźmy teraz sytuację dla większych wartości parametrów oraz $c \neq 0$ i weźmy pod uwagę 
+$$m = 86436, \quad a = 1093, \quad c = 18257.$$
+
+```{r linear-test3, echo=TRUE}
+check_assumptions(m=86436, a=1093, c=18257)
+lcgen(50, 86436, 1093, 18257, 1)
+```
+
+Ponownie zmieńmy parametry na
+$$m = 2^{11} +1, \quad a = 64, \quad c=73.$$
+
+```{r linear-test4, echo=TRUE}
+check_assumptions(m=(2^11+1), a=64, c=73)
+lcgen(50, (2^11 + 1), 64, 73, 1)
+```
+
+Kolejny raz warunki zostają spełnione, a generator zachowuje się zgodnie z oczekiwaniami. Czas przetestować go na parametrach o błędnych założeniach, weźmy więc
+$$m = 8, \quad a=2, \quad c=1.$$
+
+```{r linear-test5, echo=TRUE}
+check_assumptions(m=8, a=2, c=1)
+lcgen(50, 8, 2, 1, 1)
+```
+
+Nie zostało spełnione założenie o podzielności $a-1$ przez 4, gdy $m$ jest podzielna. Możemy zauważyć, że wygenerowały zostały zaledwie dwie różne wartości, gdzie w tym przypadku oczekiwalibyśmy ich siedem. Zmieńmy, więc i podstawmy $a=4$, aby było ono podzielne przez 4.
+
+```{r linear-test6, echo=TRUE}
+check_assumptions(m=8, a=4, c=1)
+lcgen(50, 8, 4, 1, 1)
+```
+
+Niestety wówczas nie zostaje spełnione założenie o podzielności przez każdą liczbę pierwszą dzielącą $m$ co skutkuje w wygenerowaniu $50$ tych samych wartości. Zmieńmy, więc wartość $m$ na $m=9$, ale ustawiając przy tym $c=3$.
+
+```{r linear-test7, echo=TRUE}
+check_assumptions(m=9, a=4, c=3)
+lcgen(50, 9, 4, 1, 3)
+```
+
+Tym razem nie spełniliśmy założenia, aby $m$ i $c$ były względnie pierwsze otrzymując ciąg liczb nie przypominający ciągu pseudolosowego. Sprawdźmy więc sytuację dla $c=0$ oraz $a=8$ pozostawiając $m$ na tym samym poziomie.
+
+```{r linear-test8, echo=TRUE}
+check_assumptions(m=9, a=8, c=0)
+lcgen(50, 9, 8, 0, 3)
+```
+
+Otrzymaliśmy ciąg bez pełnego okresu bez żadnej pseudolosowości (wygenerowane wartości to tak naprawdę powtarzający się ciąg 
+liczb $(2/3, 1/3)$). Podstawmy jeszcze wartości $m=2$, $a=1$. 
+
+```{r linear-test9, echo=TRUE}
+check_assumptions(m=2, a=1, c=0)
+lcgen(50, 2, 1, 0, 3)
+```
+
+W takiej przypadku mamy ciąg stały składający się z jednej liczby. Zaprezentowane błędne przykłady idealnie oddają istotność postawionych, w pierwszej części pracy, założeń do otrzymania prawidłowego generatora pseudolosowego liniowej kongruencji. 
+
+## Problem przekroczenia zakresu liczb całkowitych
+Rozważane powyżej przykłady nie przekraczają zakresu liczb całkowitych. Sytuacja nieco się zmienia, gdy chcemy zastosować naprawdę wysokie wartości parametrów, na przykład duży mnożnik $a$. Wtedy generator można skonstruować w nieco innej postaci, przedstawiając $a$ jako $a=2^\alpha a_1 + a_2$, gdzie $a_1, a_2 < 2^\alpha$, a następnie zapisując
+$$ax_i \ mod(m) = (a_1(2^\alpha x_i \ mod(m)) + a_2 x_i \ mod(m)) \ mod(m).$$
+Dzięki temu jesteśmy w stanie zapobiec przekroczeniu zakresu liczb całkowitych. Zapis przy arytmetyce liczb całkowitych jest często szybszy niż przy użyciu arytmetyki liczb zmiennoprzecinkowych. Jednak, aby uniknąć zjawiska overflow, generator kongurencji liniowej w arytmetyce liczb całkowitej musi zostać ograniczony do niezwykle małej wartości modulo $m=2^{15} - 1$. 
+
+## Wizualizacja i ocena
+Jeżeli zmienne losowe $U_1, U_2, U_3, ...$ są niezależne i pochodzą z rozkładu jednostajnego jednostkowego $U(0,1)$, wówczas wektor $(U_1, U_2)$ losowy również pochodzi z rozkładu jednostajnego opisanego na kwadracie jednostkowym, natomiast wektor losowy $(U_1, U_2, U_3)$ będzie pochodził z rozkładu jednostajnego opisanego na sześcianie jednostkowym i tak dalej. Dlatego jednym ze sposobów porównywania między sobą wyników generatora pseudolosowego jest zmapowanie ich na siatkę $[0,1]^d$, a następnie sprawdzenie w jakim stopniu wypełniają one jednostajnie powierzchnię. W idealnym wypadku, żaden wzorzec nie byłby dostrzegalny przy wizualizacji, jednak taki nie istnieje bowiem zawsze, przy wystarczająco dokładnej inspekcji, zawsze można dostrzec pewien schemat. Mamy jednak nadzieję, że przy żądanym rozmiarze, będzie on jak najmniej widoczny. Dodatkowo przydatny jest histogram, aby sprawdzić czy rozkład punktów rzeczywiście przypomina rozkład jednostajny. Przygotujmy funkcję pod wykreślenie takiej wizualizacji:
+
+```{r linear-plot, echo=TRUE}
+# Display Results
+plotting <- function(u){
+  m <- length(u)
+  par(mfrow=c(1,2), pty="s") 
+  hist(u, breaks=10, col="wheat", main=NULL)
+  abline(h=m/10, lty="dashed")
+  u1 = u[1:(m-1)]; u2 = u[2:m] 
+  plot (u1, u2, pch=19)
+  par(mfrow=c(1,1), pty="m")
+  mtext(paste("Wygenerowane wyniki dla wektora dlugosci",m))
+}
+```
+
+Sprawdźmy dla generatora o pierwszych parametrach.
+
+```{r linear-plot1, echo=TRUE}
+u <- lcgen(50, 53, 20, 0, 1)
+plotting(u)
+```
+
+Z łatwością możemy dostrzec wzorzec, sprawdźmy więc czy długość wygenerowanego wektora $n$ zmieni sytuację.
+
+```{r linear-plot2, echo=TRUE}
+u <- lcgen(10000, 53, 20, 0, 1)
+plotting(u)
+```
+
+Niektóre wartości "wyrównały" do rozkładu jednostajnego, jednak inne się "przebiły". Dodatkowo, wzorzec się pogłębia. Dobrane parametry ewidentnie dają dość słabe wyniki pod kątem losowości. Zmieńmy ich dobór i sprawdźmy więc drugi z wymienionych wyżej przykładów parametrów.
+
+```{r linear-plot3, echo=TRUE}
+u <- lcgen(50, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+Przy $50$ wygenerowanych wartościach rozkład dosyć słabo przybliża rozkład jednostajny, jednak widać pewną losowość przy mapowaniu wartości. Zwiększmy liczbę próbek do $n=1000$.
+
+```{r linear-plot4, echo=TRUE}
+u <- lcgen(1000, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+Od razu widać znaczną poprawę, rozkład coraz bardziej przypomina rozkład jednostajny, a mapowanie zaczyna wypełniać kwadrat jednostkowy bez wyraźnego wzorca. Pójdźmy krok w przód i ponownie zwiększmy liczbę próbek, tym razem do $n=10000$.
+
+```{r linear-plot5, echo=TRUE}
+u <- lcgen(10000, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+Przykład idealnie ukazuje, jak wygenerowane wartości bardzo mocno zbliżyły się do rozkładu jednostajnego oraz wypełniły prawie cały kwadrat. W przeciwieństwie do pierwszych wizualizacji, tutaj możemy mówić o dobrze dobranych parametrach, które ukazują trafną pseudolosowość generatora. Weźmy jednak jeszcze nieco mniejszą próbkę $n=100$, aby zobaczyć pewne zależności względem parametrów.
+
+```{r linear-plot6, echo=TRUE}
+u <- lcgen(100, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+Teraz zmienimy ziarno losowe $x_0$ na wartość $x_0 = 142$.
+
+```{r linear-plot7, echo=TRUE}
+u <- lcgen(100, 86436, 1093, 18257, 142)
+plotting(u)
+```
+
+Możemy zauważyć na mapowaniu wygenerowanych punktów, że są one inaczej rozłożone. Jest to naturalna konsekwencja, bowiem ziarno inicjuje nam punkt początkowy i gwarantuje reprodukowalność wyników. W ostatnim etapie porównajmy powyższe wygenerowane wyniki z wynikami uzyskanymi poprzez generator liniowej kongruencji dostępny w bibliotece. W tym celu skorzystamy z biblioteki *fBasics* oraz funkcji *runif.lcg*. Rozpoczniemy od wygenerowania wartości dla próbki $n=100$. 
+
+```{r linear-plot8, echo=TRUE, warning=FALSE, message=FALSE}
+library(fBasics)
+set.lcgseed(142)
+u <- runif.lcg(n=100, min=0, max=1)
+plotting(u)
+```
+
+Rezultaty podobne, rozkład przypominający rozkład jednostajny, a mapowanie bez narzucających się wzorców. Sprawdźmy zatem, który szybciej uzyska wizualną zbieżność do rozkładu jednostajnego oraz wypełnienia kwadratu jednostkowego.
+
+```{r linear-plot9, echo=TRUE}
+u <- runif.lcg(n=1000, min=0, max=1)
+plotting(u)
+```
+
+W dalszym ciągu rezultaty są porównywalne, weźmy więc $n=10000$.
+
+```{r linear-plot10, echo=TRUE}
+u <- runif.lcg(n=10000, min=0, max=1)
+plotting(u)
+```
+
+I w tym przypadku bez zmian, generator z biblioteki przy takiej wielkości próbki również prawie całościowo wypełnia powierzchnię kwadratu i jego rozkład jest mocno zbliżony do rozkładu jednostajnego. Jest to oczywiście spodziewany wniosek, bowiem obydwa podejścia stosują generator liniowej kongruencji. Ewentualne różnice mogą wynikać chociażby z czasu generowania liczb pseudolosowych ze względu chociażby na zastosowaną arytmetykę o czym wspomniano wcześniej. Dodatkowo, algorytm liniowej kongruencji może zostać zaadoptowany na kilka sposobów w zależności od przyjętych założeń, gdzie niektóre mogą być szybsze. W przypadku zaimplementowanego już generatora w bibliotece nie mamy jednak potrzeby inicjacji parametrów, które jak mogliśmy się przekonać, potrafią spowodować, iż wygenerowane liczby będą błędne i nie będą pochodziły z rozkładu jednostajnego.
+
+## Podsumowanie
+W pierwszej części zaprezentowana została ogólna idea generatora liczb pseudolosowych wraz z warunkami na uzyskanie generatora efektywnego. Następnie podano przykładowy generator, jakim był generator kongruencji liniowej, wraz z algorytmem na jego uzyskanie. Później omówiono ogólne zasady konstrukcji generatora liczb pseudolosowych z istotnymi pojęciami jak długość okresu, reprodukowalność, prędkość, przenośność oraz losowość. Kolejnym etapem było omówienie generatora kongruencji liniowej. Podano jego ogólną postać oraz założenia, które musi spełniać żeby pozyskać z niego wiarygodne wyniki wygenerowanych liczb pseudolosowych. Na tej podstawie stworzono funkcję generatora oraz funkcje sprawdzające założenia, które złożono w jedną. Przystąpiono do sprawdzenia napisanego generatora na przykładach, tych które założenia spełniały, jak też tych które tego nie robiły. Uzyskane wyniki krótko zinterpretowano i ostatecznie wyciągnięto konkluzje o istotności założeń podczas konstrukcji. Omówiono także pokrótce problem przekroczenia zakresu liczb całkowitych. Ostatnim etapem była wizualizacja wyników oraz ich ocena. Przytoczono dwa wcześniej użyte przykłady z czego wysunięto odpowiednie wnioski. Poprawne rezultaty zestawiono także z wynikami uzyskanymi przy pomocy generatora wbudowanego w jednej z bibliotek i je opisano. Sposobów na stworzenie poprawnego generatora jest wiele, jednak zawsze trzeba sprawdzić założenia, a przede wszystkim je spełniać. 

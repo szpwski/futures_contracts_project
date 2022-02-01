@@ -1,0 +1,291 @@
+---
+title: "Implementacja metody Monte Carlo dla modelu Blacka-Scholesa wyceny opcji."
+author: "Szymon Pawłowski s176528"
+output: pdf_document
+---
+
+```{r bs-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Implementacja metody Monte Carlo dla modelu Blacka-Scholesa wyceny opcji
+## Wprowadzenie
+
+Opcje są jednym z instrumentów finansowych, który występuje na giełdzie jak też na rynku OTC ("over-the-counter market"). Wyróżniamy dwa rodzaje opcji, pierwszą z nich jest opcja **call**, która *daje posiadaczowi opcji prawo do zakupu pewnego aktywa w określonej dacie za określoną cenę*. Drugą z nich jest opcja **put**, która z kolei *daje posiadaczowi akcji prawo do sprzedaży pewnego aktywa w określonej dacie za określoną cenę*. Cena w kontrakcie jest znana jako cena wykonania (ang. "strike price" / "excercise price"), a data zawarta w kontrakcie nazywana jest datą wygaszenia (ang. "expiration date") lub dojrzałością (ang. "maturity"). 
+
+Co więcej, możemy rozróżnić opcje *amerykańskie* oraz opcje *europejskie*. Opcje amerykańskie można wykonać w każdym momencie, aż do daty wygaszenia. Natomiast opcje europejskie mogą zostać wykonane jedynie w momencie dojrzałości kontraktu. Oczywiście nazwy te nie odnoszą się do lokacji geograficznej. 
+
+Warto zwrócić uwagę, że opcja daje prawo posiadaczowi do wykonania pewnej czynności, jednak to prawo nie musi zostać zrealizowane. Jest to czynnik odróżniający opcje od kontraktów forward i futures, gdzie posiadacz takiego kontraktu jest zobligowany do kupna bądź sprzedaży odpowiadających aktywów. Z drugiej strony, wejście w kontrakt typu forward/futures nie wymaga wkładu pieniężnego, a zakup opcji wnosi pewne koszta (chociaż tutaj będziemy zakładać opcje bezkosztowe).
+
+W przypadku opcji możliwe są do zauważenia pewne zależności względem ceny wykonania. Gdy cena ta wzrasta to przeważnie cena opcji call maleje, a cena opcji put rośnie. Ponadto, obydwa typy opcji mają tendencje do wzrostu wartości, gdy czas do daty wykonania wzrasta. 
+
+Na rynku opcji możemy wyróżnić cztery typy uczestników: kupiec opcji call, sprzedawca opcji call, kupiec opcji put oraz sprzedawca opcji put. Opcje są często wykorzystywane w hedgingu w celu zabezpieczenia pewnych przyjętych pozycji i dokonanych inwestycji. 
+
+## Zysk z opcji
+
+Oznaczmy przez $S(t)$ cenę pewnej akcji w czasie $t$. Rozważmy opcję call, która daje posiadaczowi prawo do kupna tej akcji za określoną cenę $K$ w określonym czasie przyszłym $T$. Niech $t=0$. Jeżeli w czasie $T$ wartość ceny akcji $S(T)$ przekroczy cenę wykonania $K$ to posiadacz wykorzysta opcję uzyskując zysk wysokości $S(T) - K$. Z drugiej strony, jeśli $S(T) \leq K$ to opcja nie zostanie wykonania i się przedawni (rozważamy opcję europejską, więc wykonana może zostać jedynie w czasie $T$). W takim razie zysk posiadacza opcji w czasie $T$ jest następujący
+$$(S(T) - K)^{+} = \max\{0, S(T)-K\}.$$
+Należy jeszcze zdyskontować tą wartość, aby uzyskać wartość aktualną tego zysku. W tym celu mnożymy całość przez czynnik dyskonta $e^{-rT}$, gdzie $r$ jest stale naliczaną stopą procentową. Wartość oczekiwana zysku wynosi, więc
+$$E[e^{-rT}(S(T) - K)^{+}].$$
+Aby ta wartość miała sens, musimy określić rozkład zmiennej losowej ceny akcji $S(T)$.
+
+## Model Blacka-Scholesa
+
+Zamiast określać rozkład w określonym czasie, wprowadzimy model odwzorowujący dynamikę ceny akcji. Modelem opisującym ewolucję tej ceny poprzez stochastyczne równania różniczkowe (ang. "stochastic differential equations (SDE)") jest model Blacka-Scholesa, który opisuje równanie
+$$\frac{dS(T)}{S(t)} = rdt + \sigma dW(t),$$
+gdzie $W$ jest standardowym ruchem Browna. To równanie może być interpretowane jako modelowanie zmiany procentowa $dS/S$ ceny akcji poprzez przyrosty ruchu Browna. Parametr $\sigma$ oznacza zmienność ceny akcji, a czynnik przy $dt$ jest średnią stopą zwrotu. W przypadku, gdy uwzględnimy średnią stopę zwrotu jako równą stopie procentowej $r$ to będziemy wprost określali neutralną pod kątem ryzyka dynamikę ceny akcji. 
+
+Rozwiązaniem tego stochastycznego równania różniczkowego, czyli równania opisującego model Blacka-Scholesa jest następujące
+$$S(T) = S(0)\cdot exp([r-\frac{1}{2}\sigma^2]T + \sigma \sqrt{T}Z).$$
+Logarytm ceny akcji ma więc rozkład normalny, a sama cena akcji ma rozkład log-normalny. 
+Wartość oczekiwana $E[e^{-rT}(S(T)-K)^{+}]$ jest całką ze względu na gęstość log-normalnego rozkładu $S(T)$. Ta całka może być oszacowana poprzez dystrybuantę rozkładu normalnego $\Phi$ jako $BS(S(0),\sigma, T, r, K)$, gdzie
+$$BS(S, \sigma, T, r, K) = S\Phi(\frac{\log{(S/K)} + (r+\frac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}) - e^{-rT}K\Phi(\frac{\log{(S/K)} + (r-\frac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}).$$
+Powyższa formuła jest formułą Blacka-Scholesa dla opcji call. 
+
+## Bieżąca wartość oczekiwana zysku z opcji europejskiej
+
+Z równania SSD możemy zauważyć, że żeby wylosować próbkę cen akcji $S(T)$ wymagany jest mechanizm do losowania próbek ze standardowego rozkładu normalnego. Taki mechanizm zaimplementowaliśmy w poprzednim projekcie i wykorzystam go dla tego zagadnienia. Dokładniej mowa o algorytmie Boxa-Mullera tylko tym razem już dla czytelności wykorzystamy wbudowany generator liczb z rozkładu jednostajnego.
+
+```{r bs-r8, echo=TRUE}
+normal_box <- function(N){
+  X <- c()
+  
+  while(length(X) < N){
+
+    U <- runif(2)
+    U1 <- U[1]
+    U2 <- U[2]
+    R <- -2*log(U1)
+    V <- 2*pi*U2
+      
+    Z1 <- sqrt(R)*cos(V)
+    Z2 <- sqrt(R)*sin(V)
+      
+      
+    X <- append(X,c(Z1,Z2))
+    }
+  
+  return(X)
+}
+```
+
+Zakładamy, więc że generujemy wektor $Z = (Z_1, Z_2, ...)$ niezależnych zmiennych losowych o normalnym rozkładzie standardowym. Mając możliwość wygenerowania $Z_i$ możemy wyestymować $E[e^{-rT}(S(T)-K)^{+}]$ poniższym algorytmem:
+
+```{r bs-ralg, echo=TRUE}
+
+expected_value <- function(N, s, r, K, sigma, Ti){
+  # N - liczba iteracji
+  # s - początkowa wartość akcji
+  # r - stopa procentowa
+  # sigma - zmienność cen akcji 
+  # Ti - czas wykonania opcji
+  
+  C <- rep(0, N)
+  S <- rep(0, N)
+  
+  Z <- normal_box(N)
+  for (i in 1:N){
+    S[i] <- s*exp((r-1/2*sigma^2)*Ti + sigma*sqrt(Ti)*Z[i])
+    C[i] <- exp(-r*Ti)*max(0, S[i] - K)
+  }
+  
+  return(C)
+}
+
+```
+
+Funkcja zwraca wektor losowy, więc wystarczy wziąć jego średnią, aby uzyskać chcianą wartość oczekiwaną. Krok ten jednak zostanie zaimplementowany w późniejszym etapie.
+Dla dowolnego $N\geq 1$ taki estymator wartości oczekiwanej jest nieobciążony, tj.
+$$E[C_{avg}] = C \equiv E[e^{-rT}(S(T)-K)^{+}].$$
+Co więcej, przy $n \rightarrow \infty$ możemy zauważyć, że $C_{avg} \rightarrow C$ z prawdopodobieństwem 1. Dla tego algorytmu możemy także zaimplementować przedział ufności estymowanej wartości oczekiwanej dla pewnego współczynnika $\alpha$. Oznaczmy odchylenie standardowe wektora $C = (C_1, ..., C_N)$ przez 
+$$s_C = \sqrt{\frac{1}{N-1}\sum_{i=1}^{N}{(C_i - C_{avg})^2}}.$$
+Dodatkowo, niech $z_{\alpha}$ oznacza $(1-\alpha)$ kwantyl standardowego rozkładu normalnego ($\Phi(z_{\alpha}) = 1-\alpha$). Wówczas
+$$C_{avg} \pm z_{\alpha/2}\frac{s_C}{\sqrt{N}}$$
+jest asymptotycznie (przy $n\rightarrow \infty$) zgodne z ($1-\alpha$) przedziałem ufności dla $C$. Przykładowo dla $95$% przedziału ufności $\alpha = 0.05$ oraz $z_{\alpha/2} \approx 1.96$. Możemy zaimplementować obliczanie przedziału w następujący sposób (dla wartości $\alpha \in \{0.01, 0.05, 0.1\}$).
+
+```{r bs-rufn, echo=TRUE}
+confidence_interval <- function(alpha, C){
+  # alpha - parametr ufności, alpha = 0.01, 0.05, 0.1
+  # C_avg - wartość oczekiwana zysku
+  # C - wektor zmiennych losowych zysku
+  C_avg <- mean(C)
+  
+  if (alpha == 0.01){
+    z_alpha <- 2.58
+  } else if (alpha == 0.05){
+    z_alpha <- 1.96
+  } else if (alpha == 0.1){
+    z_alpha <- 1.64
+  } else{
+    z_alpha <- "Nie zaimplementowano!"
+  }
+  
+  s_c <- sqrt((sum(C-C_avg)^2)/(length(C)-1))
+  
+  interval <- z_alpha*s_c/sqrt(length(C))
+  return(interval)
+}
+```
+
+Teraz stworzymy funkcję zwracającą zarówno wartość oczekiwaną, jak też przedział ufności.
+
+```{r bs-rlaczn, echo=TRUE}
+combine <- function(N, s, r, K, sigma, Ti, alpha){
+  C <- expected_value(N, s, r, K, sigma, Ti)
+  inter <- confidence_interval(alpha, C)
+  
+  return(c(mean(C), inter))
+}
+```
+
+Taka funkcja zwracać będzie wektor złożony z wartości oczekiwanej zysku opcji oraz przedziału ufności. 
+
+## Ceny akcji Tesli i model BS
+
+Weźmiemy pod uwagę roczną historię (od 06 stycznia 2021 do 06 stycznia 2022) danych dla cen akcji Tesli w dolarach. Wczytajmy owe dane, które pobieramy ze strony [finance.yahoo.com/quote/TSLA](https://finance.yahoo.com/quote/TSLA/history?p=TSLA).
+
+```{r bs-p1, echo=TRUE}
+data <- read.csv("TSLA.csv")
+head(data)
+```
+
+Mamy dokładnie 254 wierszy czyli 254 dni, w których giełda była otwarta. Nasze dane musimy przesortować, odrzucić braki oraz obliczyć zyski procentowe czyli od cen zamknięcia danego dnia odjąć cenę zamknięcia z dnia poprzedniego i podzielić przez nią.
+
+```{r bs-p2, echo=TRUE}
+data <- data[order(data$Date),]
+data <- na.omit(data)
+data["close_day_before"] <- c(NA, head(data$Close, -1))
+data["returns"] = ((data$Close - data$close_day_before)/data$close_day_before)
+head(data)
+```
+
+Naszą zmienność potraktujemy jako roczne odchylenie standardowe ze stóp zwrotu.
+
+```{r bs-p21, echo=TRUE}
+sigma <- sqrt(254)*sd(data$returns, na.rm=TRUE)
+sigma
+```
+
+Wczytamy też dane z opcji dla dnia 18 luty 2022 ze strony [finance.yahoo.com/quote/TSLA/options](https://finance.yahoo.com/quote/TSLA/options?p=TSLA&date=1645142400), tak więc do daty wykonania dzielą nas 43 dni zatem $T=43/254$.
+
+```{r bs-p3, echo=TRUE}
+library(rvest)
+theurl <- 'https://finance.yahoo.com/quote/TSLA/options?p=TSLA&date=1645142400'
+file<-read_html(theurl)
+tables<-html_nodes(file, "table")
+r <- as.data.frame(html_table(tables[1], fill = TRUE))
+r$Strike <- gsub(",","",r$Strike)
+r$Strike <- as.numeric(r$Strike)
+head(r)
+```
+
+Widzimy, że mamy 151 różnych cen wykonania, ale estymat dokonamy dla pierwszych 100 w celu zredukowania ilości obliczeń. Dla każdej z cen wykonania $K$ za cenę początkową $S_0$ weźmiemy aktualną (na dzień 06.01.2022) cenę akcji tj. $S_0 = 1064.7$. Jako stopę procentową weźmiemy *The 10 Year Treasury Rate* jako stopę wolną od ryzyka przy wycenie rynku lub pojedynczego papieru wartościowego. Jest to stopa osiągana przy inwestowaniu w obligacje skarbowe USA. Na dzień dzisiejszy (06.01.2022) przyjmiemy $r=0.0171$. Na giełdzie pojawia się cena Bid oraz Ask, pierwsza z nich oznacza cenę, za którą opcję możemy sprzedać, a druga za którą możemy ją kupić. Przyrównamy, więc nasze wyestymowane ceny do tych rzeczywiście zaproponowanych. 
+
+```{r bs-p5, echo=TRUE}
+n <- 100
+estimates <- rep(0,n)
+conf_intervals <- rep(0,n)
+
+for (i in 1:n){
+  res <- combine(N=1000, s=1064.7, r=0.0171, K=r$Strike[i], sigma=sigma, Ti=43/254, alpha =0.05)
+    
+  estimates[i] <- res[1]
+  conf_intervals[i] <- res[2]
+}
+
+errors <- cbind(r[1:100,], estimates, conf_intervals)
+errors['estimate_error'] <- ((errors$Ask - errors$estimates)/errors$estimates)*100
+summary(errors$estimate_error)
+hist(errors$estimate_error, main="Histogram błędu wyceny modelu BS", xlab="Procentowy błąd")
+```
+
+Jak widać, model Blacka-Scholesa poradził sobie całkiem dobrze. Średni błąd wynosi -1.048% co oznacza, że średnio częściej model BS zawyżał ceny opcji. Jak widzimy po histogramie jednak, rozkład błędu jest lewoskośny i ma pewne dane odstające, więc warto tutaj zasugerować się medianą. Ta z kolei wynosi -0.272% i jest bliska zeru. W portalu mamy też informację o zmienności ceny $\sigma$, która może zostać wyznaczona poprzez rozwiązanie równania BS wstecznie. Jednak tutaj chcieliśmy porównać estymatę modelu BS do estymaty graczy giełdowych. Przeanalizujmy jeszcze wartości przedziałów ufności dla każdej estymaty.
+
+```{r bs-p7, echo=TRUE}
+n <- 100
+ints <- rep(0,n)
+
+for (alpha in c(0.01,0.05,0.1)){
+  for (i in 1:n){
+    ints[i] <- combine(N=1000, s=1064.7, r=0.0171, K=r$Strike[i], sigma=sigma, Ti=43/254, 
+              alpha =alpha)[2]
+  }
+  print(paste("Maksymalna wartość przedziału ufności dla alpha = ", alpha, " wynosi: ", max(ints)))
+  print(paste("Minimalna wartość przedziału ufności dla alpha = ", alpha, " wynosi: ", min(ints)))
+  print(paste("Średnia wartość przedziału ufności dla alpha = ", alpha, " wynosi: ", mean(ints)))
+
+}
+```
+
+Jak widzimy, niezależnie od przyjętego poziomu ufności $\alpha$ te wartości przedziałów są bardzo niewielkie i w porównaniu do skali estymaty wręcz nieistotne. Oznacza to, że wyniki otrzymane z modelu mają niski próg dopuszczalnego błędu. Teraz sprawdźmy jeszcze na wykresie jak kształtują się rzeczywiście te wycenione ceny przez graczy oraz zamodelowane względem cen wykonania opcji dla pierwszych 30 obserwacji w celu zwiększenia czytelności.
+
+```{r bs-p8, echo=TRUE}
+plotting <- errors[1:30,]
+plot(plotting$Strike, plotting$Ask, type = "l", col = "red", xlab="Strike price", ylab="Option price") 
+lines(plotting$Strike, plotting$estimates, type = "l", col ="blue")
+legend(x = "topright", legend = c("Market players pricing", "BS estimates"), col=c("red","blue"),
+       lty=1:1)
+```
+
+Widzimy, że rzeczywiście estymacje modelu BS są zbliżone do wycen przez graczy giełdowych. Możemy też dostrzec zależność wspomnianą na początku pracy, tj. wraz ze wzrostem ceny wykonania, cena opcji maleje. Ma na to wpływ oczywiście malejący możliwy zysk z owego kontraktu. 
+
+Sprawdźmy teraz sytuację, w której zaadaptowalibyśmy zmienność zastosowaną przez graczy giełdowych. 
+Do poprzedniego kodu dodaję przekształcenie kolumny na numeryczną i dzielę przez procent. Przypomnijmy, że nasza obrana początkowa wartość wynosiła $\sigma = 56.78$%.
+
+```{r bs-p10, echo=TRUE}
+n <- 100
+estimates2 <- rep(0,n)
+conf_intervals2 <- rep(0,n)
+
+r['sigma2'] <- gsub("%","",r$Implied.Volatility)
+r$sigma2 <- as.numeric(r$sigma2)/100
+
+for (i in 1:n){
+  res2 <- combine(N=1000, s=1064.7, r=0.0171, K=r$Strike[i], sigma=r$sigma2[i], Ti=43/254, alpha =0.05)
+    
+  estimates2[i] <- res2[1]
+  conf_intervals2[i] <- res2[2]
+}
+
+errors2 <- cbind(r[1:100,], estimates2, conf_intervals2)
+errors2['estimate_error'] <- ((errors2$Ask - errors2$estimates)/errors2$estimates)*100
+summary(errors2$estimate_error)
+hist(errors2$estimate_error ,main="Histogram błędu wyceny modelu BS dla innej zmienności", xlab="Procentowy błąd")
+```
+
+Widzimy, że ponownie model częściej dokonuje estymacji zawyżonej ale tym razem wartości procentowe błędów są dość spore gdyż średnią osiągają one 7.2%, a ich mediana wynosi -5.5%. Dodatkowo można dostrzec też dość spory rozrzut. Sprawdźmy porównanie wartości wycenionej opcji względem graczy.
+
+```{r bs-p11, echo=TRUE}
+plotting2 <- errors2[1:30,]
+plot(plotting2$Strike, plotting2$Ask, type = "l", col = "red", xlab="Strike price", ylab="Option price") 
+lines(plotting2$Strike, plotting2$estimates, type = "l", col ="blue")
+legend(x = "topright", legend = c("Market players pricing", "BS estimates"), col=c("red","blue"),
+       lty=1:1)
+```
+
+Rzeczywiście widoczne są mocniejsze odchylenia. Ta zmienność daje nam poczucie w jakim stopniu przyszli gracze będą wyceniali opcje, jeśli są racjonalni. Z tego też względu występują owe, mocniejsze odchylenia. Zastosowana zmienność ze zbioru jest znacznie wyższa od tej obranej przez nas co ma wpływ na mocniejsze wahania. 
+
+Obierzmy teraz pierwszą cenę wykonania $K=300$ i przeanalizujmy pewne własności modelu BS przy tej wartości. W pierwszej kolejności sprawdźmy przebieg zmian wartości średniej wyceny przy rosnącym ciągu czasu $T$. 
+
+```{r bs-p9, echo=TRUE}
+E <- rep(0, 254)
+Tn <- seq(1,254)
+for (i in 1:254){
+  E[i] <- combine(N=1000, s=1064.7, r=0.0171, K=300, sigma=sigma, Ti=i/254, 
+              alpha =alpha)[1]
+  
+}
+plot(Tn, E, main="Zalezność między czasem wygaśnięcia, a średnią wyceną opcji", xlab="T", ylab="Średnia wycena opcji")
+print(paste("Średnie odchylenie standardowe od wyceny: ", sd(E)))
+```
+
+Możemy zauważyć, że wraz ze wzrostem czasu wygaśnięcia opcji nasze estymowane wyceny mają coraz to większy rozrzut. Świadczy to o trudności wyceny na przestrzeni dalekiego odcinka czasu. Nie jest to jednak zaskakujące, w przeciwnym wypadku wiele osób nie musiałoby już pracować. Tutaj rozpatrujemy przestrzeń jednego roku (254 dni giełdowe), jednak w dalszej perspektywie rozrzut ten z pewnością miałby o wiele wyższą wartość odchylenia standardowego, gdyż tutaj jest to kwestia zaledwie 15 USD. 
+
+## Podsumowanie
+
+Opcje są jednym z instrumentów finansowych, które dają posiadaczowi prawo do zakupu lub sprzedaży opcji. Są świetnym sposobem na zmniejszenie ryzyka przy zakupie aktywów. Przy pomocy modelu Blacka-Scholesa, który jest matematycznym modelem rynku opisującym dynamikę cen instrumentów finansowych w czasie, jesteśmy w stanie, dając odpowiednie informacje, zamodelować w pewien sposób wartość opcji dla danej (przykładowo) akcji poprzez wyznaczenie spodziewanego zysku z zakupu owej opcji. 
+
+Przy omawianiu i tworzeniu modelu zakładaliśmy brak kosztów wynikających z zakupu czy też sprzedaży kontraktu. W celu sprawdzenia empirycznego modelu, pobraliśmy akcje firmy Tesla, Inc. z ostatniego roku oraz ceny opcji z datą wykonania w przeciągu najbliższego półtorej miesiąca. Na podstawie tych danych stworzyliśmy model i sprawdziliśmy jego średni błąd. Dokonaliśmy również krótkiej analizy przedziałów ufności otrzymanych wyników, jak też wpływu czasu wykonania opcji oraz parametru zmienności. Początkowe wyniki były względnie zadowalające. Widoczny był także wyraźny wpływ czasu wygaśnięcia opcji.
+
+Model Blacka-Scholesa jest często wykorzystywany do wyceny z racji swojej prostoty. Jednak posiada pewne założenia jak brak arbitrażu, brak ryzyka pożyczki i lokowania gotówki po tej samej stopie procentowej, brak kosztów transakcyjnych czy też brak wypłat dywidend, które są mało realistyczne. To powoduje, że w klasycznej postaci potrafi się spisać niezbyt dobrze w rynkowej rzeczywistości.
+

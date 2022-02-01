@@ -1,0 +1,34 @@
+---
+title: "Kontrakty terminowe - generatory rozkładów, modelowanie roszczeń i wycena opcji."
+subtitle: "Projekt na zajęcia Kontrakty Terminowe"
+author: "Szymon Pawłowski"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: united
+    number_sections: true
+    highlight: tango
+bibliography: references.bib  
+csl: big-data-and-information-analytics.csl
+nocite: '@*'
+link-citations: True
+header-includes:
+    - \usepackage{hyperref}
+---
+
+```{r child='1-uniform-distribution-linear-congrence.Rmd'}
+```
+
+```{r child='2-generating-pseudorandom-from-distributions.Rmd'}
+```
+
+```{r child='3-modelling-claims-process.Rmd'}
+```
+
+```{r child='4-option-pricing-bs.Rmd'}
+```
+
+# Bibliografia {-}
