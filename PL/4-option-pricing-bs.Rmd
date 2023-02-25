@@ -1,6 +1,6 @@
 ---
 title: "Implementacja metody Monte Carlo dla modelu Blacka-Scholesa wyceny opcji."
-author: "Szymon Pawłowski s176528"
+author: "Szymon Pawłowski"
 output: pdf_document
 ---
 
@@ -149,7 +149,7 @@ data <- read.csv("TSLA.csv")
 head(data)
 ```
 
-Mamy dokładnie 254 wierszy czyli 254 dni, w których giełda była otwarta. Nasze dane musimy przesortować, odrzucić braki oraz obliczyć zyski procentowe czyli od cen zamknięcia danego dnia odjąć cenę zamknięcia z dnia poprzedniego i podzielić przez nią.
+Mamy dokładnie 251 wierszy czyli 251 dni, w których giełda była otwarta. Nasze dane musimy przesortować, odrzucić braki oraz obliczyć zyski procentowe czyli od cen zamknięcia danego dnia odjąć cenę zamknięcia z dnia poprzedniego i podzielić przez nią.
 
 ```{r bs-p2, echo=TRUE}
 data <- data[order(data$Date),]
@@ -166,11 +166,11 @@ sigma <- sqrt(254)*sd(data$returns, na.rm=TRUE)
 sigma
 ```
 
-Wczytamy też dane z opcji dla dnia 18 luty 2022 ze strony [finance.yahoo.com/quote/TSLA/options](https://finance.yahoo.com/quote/TSLA/options?p=TSLA&date=1645142400), tak więc do daty wykonania dzielą nas 43 dni zatem $T=43/254$.
+Wczytamy też dane z opcji dla dnia 25 luty 2023 ze strony [finance.yahoo.com/quote/TSLA/options](https://finance.yahoo.com/quote/TSLA/options?p=TSLA&date=1678406400), tak więc do daty wykonania dzielą nas 39 dni zatem $T=39/254$.
 
 ```{r bs-p3, echo=TRUE}
 library(rvest)
-theurl <- 'https://finance.yahoo.com/quote/TSLA/options?p=TSLA&date=1645142400'
+theurl <- 'https://finance.yahoo.com/quote/TSLA/options?date=1682035200&p=TSLA'
 file<-read_html(theurl)
 tables<-html_nodes(file, "table")
 r <- as.data.frame(html_table(tables[1], fill = TRUE))
@@ -179,35 +179,35 @@ r$Strike <- as.numeric(r$Strike)
 head(r)
 ```
 
-Widzimy, że mamy 151 różnych cen wykonania, ale estymat dokonamy dla pierwszych 100 w celu zredukowania ilości obliczeń. Dla każdej z cen wykonania $K$ za cenę początkową $S_0$ weźmiemy aktualną (na dzień 06.01.2022) cenę akcji tj. $S_0 = 1064.7$. Jako stopę procentową weźmiemy *The 10 Year Treasury Rate* jako stopę wolną od ryzyka przy wycenie rynku lub pojedynczego papieru wartościowego. Jest to stopa osiągana przy inwestowaniu w obligacje skarbowe USA. Na dzień dzisiejszy (06.01.2022) przyjmiemy $r=0.0171$. Na giełdzie pojawia się cena Bid oraz Ask, pierwsza z nich oznacza cenę, za którą opcję możemy sprzedać, a druga za którą możemy ją kupić. Przyrównamy, więc nasze wyestymowane ceny do tych rzeczywiście zaproponowanych. 
+Widzimy, że mamy 176 różnych cen wykonania, ale estymat dokonamy dla pierwszych 50. Dla każdej z cen wykonania $K$ za cenę początkową $S_0$ weźmiemy aktualną (na dzień 24.02.2023) cenę akcji tj. $S_0 = 196.99$. Jako stopę procentową weźmiemy *The 10 Year Treasury Rate* jako stopę wolną od ryzyka przy wycenie rynku lub pojedynczego papieru wartościowego. Jest to stopa osiągana przy inwestowaniu w obligacje skarbowe USA. Na dzień dzisiejszy (24.02.2023) przyjmiemy $r=0.0395$. Na giełdzie pojawia się cena Bid oraz Ask, pierwsza z nich oznacza cenę, za którą opcję możemy sprzedać, a druga za którą możemy ją kupić. Przyrównamy, więc nasze wyestymowane ceny do tych rzeczywiście zaproponowanych. 
 
 ```{r bs-p5, echo=TRUE}
-n <- 100
+n <- 50
 estimates <- rep(0,n)
 conf_intervals <- rep(0,n)
 
 for (i in 1:n){
-  res <- combine(N=1000, s=1064.7, r=0.0171, K=r$Strike[i], sigma=sigma, Ti=43/254, alpha =0.05)
+  res <- combine(N=1000, s=196.88, r=0.0395, K=r$Strike[i], sigma=sigma, Ti=39/254, alpha =0.05)
     
   estimates[i] <- res[1]
   conf_intervals[i] <- res[2]
 }
 
-errors <- cbind(r[1:100,], estimates, conf_intervals)
+errors <- cbind(r[1:50,], estimates, conf_intervals)
 errors['estimate_error'] <- ((errors$Ask - errors$estimates)/errors$estimates)*100
 summary(errors$estimate_error)
 hist(errors$estimate_error, main="Histogram błędu wyceny modelu BS", xlab="Procentowy błąd")
 ```
 
-Jak widać, model Blacka-Scholesa poradził sobie całkiem dobrze. Średni błąd wynosi -1.048% co oznacza, że średnio częściej model BS zawyżał ceny opcji. Jak widzimy po histogramie jednak, rozkład błędu jest lewoskośny i ma pewne dane odstające, więc warto tutaj zasugerować się medianą. Ta z kolei wynosi -0.272% i jest bliska zeru. W portalu mamy też informację o zmienności ceny $\sigma$, która może zostać wyznaczona poprzez rozwiązanie równania BS wstecznie. Jednak tutaj chcieliśmy porównać estymatę modelu BS do estymaty graczy giełdowych. Przeanalizujmy jeszcze wartości przedziałów ufności dla każdej estymaty.
+Jak widać, model Blacka-Scholesa poradził sobie całkiem dobrze. Średni błąd wynosi 0.6971% co oznacza, że średnio częściej model BS zaniżał ceny opcji. Jak widzimy po histogramie jednak, rozkład błędu jest prawoskośny i ma pewne dane odstające, więc warto tutaj zasugerować się medianą. Ta z kolei wynosi 0.5680% i jest bliska zeru. W portalu mamy też informację o zmienności ceny $\sigma$, która może zostać wyznaczona poprzez rozwiązanie równania BS wstecznie. Jednak tutaj chcieliśmy porównać estymatę modelu BS do estymaty graczy giełdowych. Przeanalizujmy jeszcze wartości przedziałów ufności dla każdej estymaty.
 
 ```{r bs-p7, echo=TRUE}
-n <- 100
+n <- 50
 ints <- rep(0,n)
 
 for (alpha in c(0.01,0.05,0.1)){
   for (i in 1:n){
-    ints[i] <- combine(N=1000, s=1064.7, r=0.0171, K=r$Strike[i], sigma=sigma, Ti=43/254, 
+    ints[i] <- combine(N=1000, s=196.88, r=0.0395, K=r$Strike[i], sigma=sigma, Ti=39/254, 
               alpha =alpha)[2]
   }
   print(paste("Maksymalna wartość przedziału ufności dla alpha = ", alpha, " wynosi: ", max(ints)))
@@ -230,10 +230,10 @@ legend(x = "topright", legend = c("Market players pricing", "BS estimates"), col
 Widzimy, że rzeczywiście estymacje modelu BS są zbliżone do wycen przez graczy giełdowych. Możemy też dostrzec zależność wspomnianą na początku pracy, tj. wraz ze wzrostem ceny wykonania, cena opcji maleje. Ma na to wpływ oczywiście malejący możliwy zysk z owego kontraktu. 
 
 Sprawdźmy teraz sytuację, w której zaadaptowalibyśmy zmienność zastosowaną przez graczy giełdowych. 
-Do poprzedniego kodu dodaję przekształcenie kolumny na numeryczną i dzielę przez procent. Przypomnijmy, że nasza obrana początkowa wartość wynosiła $\sigma = 56.78$%.
+Do poprzedniego kodu dodaję przekształcenie kolumny na numeryczną i dzielę przez procent. Przypomnijmy, że nasza obrana początkowa wartość wynosiła $\sigma = 67.82$%.
 
 ```{r bs-p10, echo=TRUE}
-n <- 100
+n <- 50
 estimates2 <- rep(0,n)
 conf_intervals2 <- rep(0,n)
 
@@ -241,7 +241,7 @@ r['sigma2'] <- gsub("%","",r$Implied.Volatility)
 r$sigma2 <- as.numeric(r$sigma2)/100
 
 for (i in 1:n){
-  res2 <- combine(N=1000, s=1064.7, r=0.0171, K=r$Strike[i], sigma=r$sigma2[i], Ti=43/254, alpha =0.05)
+  res2 <- combine(N=1000, s=196.88, r=0.0395, K=r$Strike[i], sigma=r$sigma2[i], Ti=39/254, alpha =0.05)
     
   estimates2[i] <- res2[1]
   conf_intervals2[i] <- res2[2]
@@ -253,7 +253,7 @@ summary(errors2$estimate_error)
 hist(errors2$estimate_error ,main="Histogram błędu wyceny modelu BS dla innej zmienności", xlab="Procentowy błąd")
 ```
 
-Widzimy, że ponownie model częściej dokonuje estymacji zawyżonej ale tym razem wartości procentowe błędów są dość spore gdyż średnią osiągają one 7.2%, a ich mediana wynosi -5.5%. Dodatkowo można dostrzec też dość spory rozrzut. Sprawdźmy porównanie wartości wycenionej opcji względem graczy.
+Widzimy, że ponownie model częściej dokonuje estymacji zawyżonej ale tym razem wartości procentowe błędów są dość spore gdyż średnią osiągają one -48.10492%, a ich mediana wynosi -52.27396%. Dodatkowo można dostrzec też dość spory rozrzut. Sprawdźmy porównanie wartości wycenionej opcji względem graczy.
 
 ```{r bs-p11, echo=TRUE}
 plotting2 <- errors2[1:30,]
@@ -271,7 +271,7 @@ Obierzmy teraz pierwszą cenę wykonania $K=300$ i przeanalizujmy pewne własno�
 E <- rep(0, 254)
 Tn <- seq(1,254)
 for (i in 1:254){
-  E[i] <- combine(N=1000, s=1064.7, r=0.0171, K=300, sigma=sigma, Ti=i/254, 
+  E[i] <- combine(N=1000, s=196.88, r=0.0395, K=300, sigma=sigma, Ti=i/254, 
               alpha =alpha)[1]
   
 }

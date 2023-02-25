@@ -1,6 +1,6 @@
 ---
 title: "Modelowanie wielkości roszczeń ubezpieczeniowych rozkładem Gamma."
-author: "Szymon Pawłowski s176528"
+author: "Szymon Pawłowski"
 output: pdf_document
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: "Implementacja generatora liczb pseudolosowych z zadanych rozkładów"
-author: "Szymon Pawłowski s176528"
+author: "Szymon Pawłowski"
 output: pdf_document
 ---
 

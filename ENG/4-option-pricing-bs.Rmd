@@ -1,0 +1,294 @@
+---
+title: "Implementation of the Monte Carlo method for the Black-Scholes model of option
+  pricing."
+author: "Szymon Pawłowski"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r bs-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Implementation of the Monte Carlo method for the Black-Scholes model of option pricing
+## Introduction
+
+Options are one of the financial instruments that occur on the stock market as well as on the OTC ("over-the-counter market"). There are two types of options, the first is the **call** option, which *gives the option holder the right to purchase a certain asset on a certain date for a certain price*. The second is the **put** option, which in turn *gives the option holder the right to sell a certain asset on a certain date for a certain price*. The price in the contract is known as the strike price / excercise price, and the date contained in the contract is called the expiration date or maturity. 
+
+Moreover, we can distinguish between *American* options and *European* options. American options can be exercised at any time up to the expiration date. European options, on the other hand, can only be exercised at the maturity of the contract. Of course, these names do not refer to geographic location. 
+
+It is worth noting that an option gives the holder the right to perform a certain action, but this right does not have to be exercised. This is a factor that distinguishes options from forwards and futures, where the holder of such a contract is obliged to buy or sell the corresponding asset. On the other hand, entering into a forward/futures contract does not require a cash contribution, and the purchase of options brings some costs (although here we will assume no-cost options).
+
+In the case of options, it is possible to notice certain relationships to the strike price. When this price rises then mostly the price of call options decreases, and the price of put options increases. In addition, both types of options tend to increase in value when the time to the exercise date increases. 
+
+In the options market, we can distinguish four types of participants: call option buyer, call option seller, put option buyer and put option seller. Options are often used in hedging to hedge certain positions taken and investments made. 
+
+## Profit from options
+
+Let's denote by $S(t)$ the price of a certain stock at time $t$. Consider a call option that gives the holder the right to buy this stock for a certain price $K$ at a certain future time $T$. Let $t=0$. If at time $T$ the value of the stock price $S(T)$ exceeds the strike price $K$ then the holder will exercise the option earning a profit of $S(T) - K$. On the other hand, if $S(T) \leq K$ then the option will not be exercised and will expire (we are considering a European option, so it can only be exercised at time $T$). In this case, the option holder's profit at time $T$ is as follows
+$$(S(T) - K)^{+} = \max\{0, S(T)-K\}.$$
+This value still needs to be discounted to get the present value of this profit. To do this, we multiply the total by the discount factor $e^{-rT}$, where $r$ is the continuously accruing interest rate. The expected value of the profit is, therefore
+$$E[e^{-rT}(S(T) - K)^{+}].$$
+For this value to make sense, we need to determine the distribution of the random variable of the stock price $S(T)$.
+
+## Black-Scholes model
+
+Instead of specifying the distribution at a specific time, we will introduce a model to represent the dynamics of the stock price. A model that describes the evolution of this price through stochastic differential equations ("stochastic differential equations"). "stochastic differential equations (SDE)") is the Black-Scholes model, which describes equation
+$$\frac{dS(T)}{S(t)} = rdt + \sigma dW(t),$$
+where $W$ is the standard Brownian motion. This equation can be interpreted as modeling the percentage change in $dS/S$ of the stock price through increments of Brownian motion. The parameter $dSigma$ denotes the volatility of the stock price, and the factor at $dt$ is the average rate of return. If we consider the average rate of return as equal to the interest rate $r$ then we will be directly determining the risk-neutral dynamics of the stock price. 
+
+The solution to this stochastic differential equation, or the equation describing the Black-Scholes model, is as follows
+$$S(T) = S(0)\cdot exp([r-\frac{1}{2}\sigma^2]T + \sigma \sqrt{T}Z).$$
+Thus, the logarithm of the stock price has a normal distribution, and the stock price itself has a log-normal distribution. 
+The expected value $E[e^{-rT}(S(T)-K)^{+}]$ is an integral due to the density of the log-normal distribution of $S(T)$. This integral can be estimated by the distribution of the normal distribution $\Phi$ as $BS(S(0),\sigma, T, r, K)$, where
+$$BS(S, \sigma, T, r, K) = S\Phi(\frac{\log{(S/K)} + (r+\frac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}) - e^{-rT}K\Phi(\frac{\log{(S/K)} + (r-\frac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}).$$
+The above formula is the Black-Scholes formula for call options. 
+
+## The current expected value of the European option profit.
+
+From the SSD equation, we can see that in order to draw a sample of stock prices $S(T)$ a mechanism is required to draw samples from a standard normal distribution. We implemented such a mechanism in a previous project and I will use it for this issue. Specifically, we are talking about the Box-Muller algorithm, only this time we will use the built-in generator of numbers from a uniform distribution for readability.
+
+```{r bs-r8, echo=TRUE}
+normal_box <- function(N){
+  X <- c()
+  
+  while(length(X) < N){
+
+    U <- runif(2)
+    U1 <- U[1]
+    U2 <- U[2]
+    R <- -2*log(U1)
+    V <- 2*pi*U2
+      
+    Z1 <- sqrt(R)*cos(V)
+    Z2 <- sqrt(R)*sin(V)
+      
+      
+    X <- append(X,c(Z1,Z2))
+    }
+  
+  return(X)
+}
+```
+
+So we assume that we are generating a vector $Z = (Z_1, Z_2, ...)$ of independent random variables with a normal standard distribution. Having the ability to generate $Z_i$, we can estimate $E[e^{-rT}(S(T)-K)^{+}]$ with the following algorithm:
+
+```{r bs-ralg, echo=TRUE}
+
+expected_value <- function(N, s, r, K, sigma, Ti){
+  # N - number of iterations
+  # s - initial value of shares
+  # r - interest rate
+  # sigma - share price volatility 
+  # Ti - time of option exercise
+  
+  C <- rep(0, N)
+  S <- rep(0, N)
+  
+  Z <- normal_box(N)
+  for (i in 1:N){
+    S[i] <- s*exp((r-1/2*sigma^2)*Ti + sigma*sqrt(Ti)*Z[i])
+    C[i] <- exp(-r*Ti)*max(0, S[i] - K)
+  }
+  
+  return(C)
+}
+
+```
+
+The function returns a random vector, so you only need to take its average to get the desired expected value. However, this step will be implemented in a later step.
+For any $N_geq 1$ such an estimator of the expected value is unconstrained, i.e.
+$$E[C_{avg}] = C \equiv E[e^{-rT}(S(T)-K)^{+}].$$
+Moreover, with $n \infty$, we can see that $C_{avg} \rightarrow C$ with probability 1. For this algorithm, we can also implement the confidence interval of the estimated expected value for a certain coefficient ${alpha$. Let's denote the standard deviation of the vector $C = (C_1, ..., C_N)$ by 
+$$s_C = \sqrt{\frac{1}{N-1}\sum_{i=1}^{N}{(C_i - C_{avg})^2}}.$$
+In addition, let $z_{alpha}$ denote the $(1-alpha)$ quantile of the standard normal distribution ($Phi(z_{alpha}) = 1-alpha$). Then
+$$C_{avg} \pm z_{\alpha/2}\frac{s_C}{\sqrt{N}}$$
+is asymptotically (at $n-rightarrow ¢infty$) consistent with the ($1-{alpha$}) confidence interval for $C$. For example, for a $95$% confidence interval, ${alpha = 0.05$ and $z_{alpha/2} \approx 1.96$. We can implement the interval calculation as follows (for values of $\alpha \in \{0.01, 0.05, 0.1\}$).
+
+```{r bs-rufn, echo=TRUE}
+confidence_interval <- function(alpha, C){
+  # alpha - confidence parameter, alpha = 0.01, 0.05, 0.1
+  # C_avg - expected value of profit
+  # C - vector of random variables of profit
+  C_avg <- mean(C)
+  
+  if (alpha == 0.01){
+    z_alpha <- 2.58
+  } else if (alpha == 0.05){
+    z_alpha <- 1.96
+  } else if (alpha == 0.1){
+    z_alpha <- 1.64
+  } else{
+    z_alpha <- "Not implemented!"
+  }
+  
+  s_c <- sqrt((sum(C-C_avg)^2)/(length(C)-1))
+  
+  interval <- z_alpha*s_c/sqrt(length(C))
+  return(interval)
+}
+```
+
+Now we will create a function that returns both the expected value and the confidence interval.
+
+```{r bs-rlaczn, echo=TRUE}
+combine <- function(N, s, r, K, sigma, Ti, alpha){
+  C <- expected_value(N, s, r, K, sigma, Ti)
+  inter <- confidence_interval(alpha, C)
+  
+  return(c(mean(C), inter))
+}
+```
+
+Such a function will return a vector composed of the expected value of the option's profit and a confidence interval. 
+
+## Tesla stock prices and the BS model
+
+Let's consider a one-year history (from Feb 24, 2022 to Feb 24, 2023) of data for Tesla's stock prices in dollars. Let's load this data, which we download from the page [finance.yahoo.com/quote/TSLA](https://finance.yahoo.com/quote/TSLA/history?p=TSLA).
+
+```{r bs-p1, echo=TRUE}
+data <- read.csv("TSLA.csv")
+head(data)
+```
+
+We have exactly 254 rows, or 254 days on which the stock market was open. We need to sort our data, discard gaps and calculate percentage gains, i.e. subtract the previous day's closing price from the closing price on a given day and divide by it.
+
+```{r bs-p2, echo=TRUE}
+data <- data[order(data$Date),]
+data <- na.omit(data)
+data["close_day_before"] <- c(NA, head(data$Close, -1))
+data["returns"] = ((data$Close - data$close_day_before)/data$close_day_before)
+head(data)
+```
+
+We will treat our volatility as the annual standard deviation from returns.
+
+```{r bs-p21, echo=TRUE}
+sigma <- sqrt(254)*sd(data$returns, na.rm=TRUE)
+sigma
+```
+
+We will also load option data for April 21, 2023 from the page [finance.yahoo.com/quote/TSLA/options](https://finance.yahoo.com/quote/TSLA/options?date=1682035200&p=TSLA) so we are 39 days away from the execution date therefore $T=39/254$.
+
+```{r bs-p3, echo=TRUE}
+library(rvest)
+theurl <- 'https://finance.yahoo.com/quote/TSLA/options?date=1682035200&p=TSLA'
+file<-read_html(theurl)
+tables<-html_nodes(file, "table")
+r <- as.data.frame(html_table(tables[1], fill = TRUE))
+r$Strike <- gsub(",","",r$Strike)
+r$Strike <- as.numeric(r$Strike)
+head(r)
+```
+
+We can see that we have 151 different strike prices, but we will make estimates for the first 50. For each of the strike prices $K$, we will take the current (as of 24/02/2023) stock price $S_0$ as the starting price $S_0$ i.e. $S_0 = 196.88.$ As the interest rate, we will take *The 10 Year Treasury Rate* as the risk-free rate when pricing the market or a single security. This is the rate achieved when investing in US Treasury bonds. As of today (24.02.2023) we will assume $r=0.0394$. The Bid and Ask prices appear on the stock market, the former denoting the price at which we can sell the option and the latter at which we can buy it. Let's compare, then, our estimated prices to those actually proposed. 
+
+```{r bs-p5, echo=TRUE}
+n <- 50
+estimates <- rep(0,n)
+conf_intervals <- rep(0,n)
+
+for (i in 1:n){
+  res <- combine(N=1000, s=196.88, r=0.0395, K=r$Strike[i], sigma=sigma, Ti=39/254, alpha =0.05)
+    
+  estimates[i] <- res[1]
+  conf_intervals[i] <- res[2]
+}
+
+errors <- cbind(r[1:50,], estimates, conf_intervals)
+errors['estimate_error'] <- ((errors$Ask - errors$estimates)/errors$estimates)*100
+summary(errors$estimate_error)
+hist(errors$estimate_error, main="Histogram of the BS model pricing error", xlab="Percentage error")
+```
+
+As you can see, the Black-Scholes model did quite well. The average error is 1.92%, which means that, on average, the BS model underpriced options more often. However, as we can see from the histogram, the error distribution has some outliers, so it is worth suggesting the median here. This one, in turn, is 1.44% and close to zero. In the portal we also have information about the volatility of the $ price, which can be determined by solving the BS equation backwards. However, here we wanted to compare the BS model estimate to the stock market players' estimate. Let's still analyze the values of the confidence intervals for each estimate.
+
+```{r bs-p7, echo=TRUE}
+n <- 50
+ints <- rep(0,n)
+
+for (alpha in c(0.01,0.05,0.1)){
+  for (i in 1:n){
+    ints[i] <- combine(N=1000, s=196.88, r=0.0394, K=r$Strike[i], sigma=sigma, Ti=39/254, 
+              alpha =alpha)[2]
+  }
+  print(paste("The maximum value of the confidence interval for alpha = ", alpha, " equals: ", max(ints)))
+  print(paste("The minimum value of the confidence interval for alpha = ", alpha, " equals: ", min(ints)))
+  print(paste("The average value of the confidence interval for alpha = ", alpha, " equals: ", mean(ints)))
+
+}
+```
+
+As we can see, regardless of the confidence level $alpha$ adopted, these interval values are very small and, compared to the scale of the estimate, even insignificant. This means that the results obtained from the model have a low threshold of acceptable error. Now let's still check on the chart how these player-priced and modeled prices actually evolve relative to option strike prices for the first 30 observations to increase readability.
+
+```{r bs-p8, echo=TRUE}
+plotting <- errors[1:30,]
+plot(plotting$Strike, plotting$Ask, type = "l", col = "red", xlab="Strike price", ylab="Option price") 
+lines(plotting$Strike, plotting$estimates, type = "l", col ="blue")
+legend(x = "topright", legend = c("Market players pricing", "BS estimates"), col=c("red","blue"),
+       lty=1:1)
+```
+
+We can see that, indeed, the BS model estimates are close to the valuations by stock market players. We can also see the relationship mentioned at the beginning of the paper, i.e. as the strike price increases, the option price decreases. This is, of course, influenced by the decreasing possible profit from this contract. 
+
+Now let's check the situation in which we would adapt the volatility used by the stock players. 
+To the previous code I add the column transformation to numeric and divide by the percentage. Recall that our chosen initial value was $\sigma = $67.82%.
+
+```{r bs-p10, echo=TRUE}
+n <- 50
+estimates2 <- rep(0,n)
+conf_intervals2 <- rep(0,n)
+
+r['sigma2'] <- gsub("%","",r$Implied.Volatility)
+r$sigma2 <- as.numeric(r$sigma2)/100
+
+for (i in 1:n){
+  res2 <- combine(N=1000, s=196.88, r=0.0394, K=r$Strike[i], sigma=r$sigma2[i], Ti=39/254, alpha =0.05)
+    
+  estimates2[i] <- res2[1]
+  conf_intervals2[i] <- res2[2]
+}
+
+errors2 <- cbind(r[1:100,], estimates2, conf_intervals2)
+errors2['estimate_error'] <- ((errors2$Ask - errors2$estimates)/errors2$estimates)*100
+summary(errors2$estimate_error)
+hist(errors2$estimate_error ,main="Histogram of BS model pricing error for different volatility", xlab="Percentage error")
+```
+
+We can see that, again, the model overestimates more often, but this time the error percentages are quite large as the average reaches -48.2% and the median is -52.68% (mainly because of the outlying forecast). In addition, one can also see quite a spread. Let's check the comparison of the value of the priced option against the players.
+
+```{r bs-p11, echo=TRUE}
+plotting2 <- errors2[1:30,]
+plot(plotting2$Strike, plotting2$Ask, type = "l", col = "red", xlab="Strike price", ylab="Option price") 
+lines(plotting2$Strike, plotting2$estimates, type = "l", col ="blue")
+legend(x = "topright", legend = c("Market players pricing", "BS estimates"), col=c("red","blue"),
+       lty=1:1)
+```
+
+Indeed, stronger biases are evident. This volatility gives us a sense of the extent to which future players will price options if they are rational. Therefore, these stronger deviations are present. The applied volatility from the set is much higher than the one we chose, which affects the stronger variance. 
+
+Let's now take the median strike price $K=340$ and analyze some properties of the BS model at this value. First, let's check the course of changes in the average valuation with increasing time series $T$. 
+
+```{r bs-p9, echo=TRUE}
+E <- rep(0, 254)
+Tn <- seq(1,254)
+for (i in 1:254){
+  E[i] <- combine(N=1000, s=196.88, r=0.0394, K=340, sigma=sigma, Ti=i/254, 
+              alpha =alpha)[1]
+  
+}
+plot(Tn, E, main="Relationship between expiration time and average option pricing", xlab="T", ylab="Average option pricing")
+print(paste("Average standard deviation from valuation: ", sd(E)))
+```
+
+We can see that as the time of option expiration increases, our estimated valuations have an increasing spread. This indicates the difficulty of valuation over a long stretch of time. However, this is not surprising, otherwise many people would no longer have to work. Here we are considering the space of one year (254 trading days), but in the long run the spread would certainly have a much higher standard deviation value, as here it is a matter of just $15. 
+
+## Summary
+
+Options are one of the financial instruments that give the holder the right to buy or sell options. They are a great way to reduce risk when buying assets. Using the Black-Scholes model, which is a mathematical model of the market that describes the price dynamics of financial instruments over time, we are able, given the right information, to model in some way the value of an option for a given (for example) stock by determining the expected profit from the purchase of that option. 
+
+In discussing and creating the model, we assumed no costs arising from the purchase or sale of the contract. To test the model empirically, we took Tesla, Inc. stock from the past year and option prices with an exercise date within the next month and a half. Based on this data, we created a model and checked its average error. We also briefly analyzed the confidence intervals of the results obtained, as well as the effect of the time of option exercise and the volatility parameter. The initial results were relatively satisfactory. The influence of the time of option expiration was also evident.
+
+The Black-Scholes model is often used for valuation because of its simplicity. However, it has certain assumptions like no arbitrage, no risk of borrowing and placing cash at the same interest rate, no transaction costs or no dividend payments, which are not very realistic. This makes it able to perform not very well in its classic form in the market reality.
+

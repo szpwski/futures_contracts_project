@@ -1,0 +1,744 @@
+---
+title: "Implementation of a pseudorandom number generator from given distributions"
+author: "Szymon Pawłowski"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r pseudo-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Implementation of a pseudorandom number generator from given distributions
+
+## Introduction
+Having created a pseudorandom number generator, we assume the availability of an ideal sequence of random numbers, that is, we consider a sequence of independent random variables $U_1, U_2, ...$, where each of them satisfies
+$$P(U_i \leq u) = \begin{cases}
+0, & u <0 \\
+u, & 0 \leq u <1 \\
+1, & u >1.
+\end{cases}
+$$.
+so it comes from the uniform distribution $U([0,1])$. Often we want to obtain a sequence of numbers generated from a distribution other than the uniform distribution, for this purpose, transformations are mostly used on samples from the uniform distribution to transform them so that they come from another desired distribution. One such method is the inverse transformation.
+
+When implementing algorithms to generate numbers from different distributions, we will use a pseudorandom number generator from the uniform distribution created earlier, as well as a function that controls assumptions. At the same time, for the values of $m$, $a$, $c$, $x$ we will take the following. 
+$$m = 2^{31} -1, \quad a = 16807, \quad c=24, \quad x=1$$.
+as the valid values of the generator,
+values
+$$m = 2^{11} +1, \quad a = 64, \quad c=73, \quad x=1$$.
+as relatively correct values, and
+$$m = 8, \quad a=2, \quad c=1,\quad x=1$$.
+as incorrect values. 
+
+```{r pseudo-func, echo=FALSE}
+valid <- c(2^31 - 1, 16807, 24, 1)
+badvalid <- c(2^11+1, 64, 73,1)
+nonvalid <- c(8,2,1,1)
+
+
+lcgen <- function(n, m, a, c, x){
+  
+  gen <- vector(length = n)
+  
+  for (i in 1:n){
+    x <- (a * x + c) %% m
+    gen[i] <- x/m
+  }
+  
+  return(gen)
+}
+gcd <- function(x,y) {
+  r <- x%%y;
+  return(ifelse(r, gcd(y, r), y))
+}
+prime_division <- function(x,y){
+  is_prime <- function(n) n == 2L || all(n %% 2L:max(2,floor(sqrt(n))) != 0)
+  
+  div <- c(1:(y-1))
+  divisors <- div[x %% div == 0]
+  
+  primes <- c()
+  for (i in 1:length(divisors)){
+    if (is_prime(divisors[i])==TRUE){
+      if ((y-1) %% divisors[i] == 0){
+        
+        primes <- c(primes, TRUE)
+      
+      } else {
+        print(divisors[i])
+        primes <- c(primes, FALSE)
+      }
+    }
+  }
+  return(primes)
+}
+four_division <- function(x,y){
+  if (((x %% 4 == 0) & ((y-1) %% 4 == 0)) | ((x %% 4 != 0) & ((y-1) %% 4 != 0))){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+multiplication <- function(x,y){
+  if (y %% (x^(y-1)) != 0){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+multi_multiplication <- function(x,y){
+  info <- c()
+  for (i in 1:(x-2)){
+    if (y %% (x^i - 1) == 0){
+      info <- c(info, FALSE)
+    } else {
+      info <- c(info, TRUE)
+    }
+  }
+  return(info)
+}
+check_assumptions <- function(m,a,c){
+  if (c != 0){
+    if (gcd(c,m) == 1){
+      if (all(prime_division(m, a))==TRUE){
+        if (four_division(m, a)==TRUE){
+          return("Assumptions met!")
+        }
+        else{
+          return("Error: the number m divisible by 4, but (a-1) is not!")
+        }
+      } else {
+        return("Error: not every first number dividing m also divides a-1!")
+      }
+    } else {
+      return("Error: the numbers c and m are not relatively prime!")
+    }
+  } else if (c == 0){
+    if (multiplication(m, a)==TRUE){
+      if (all(multi_multiplication(m,a))==TRUE){
+        return("Assumptions met!")
+      } else {
+        return("Error: the number a^j - 1 is a multiple of m for some j!")
+      }
+    } else {
+      return("Error: the number a^(m-1) is a multiple of m!")
+    }
+  } else {
+    return("The case has not been served!")
+  }
+}
+```
+
+## Inverse transformation method
+Suppose we want to sample from the distribution, so we want to generate a random variable $X$ with a property such that $P(X \leq x) = F(x)$ for each $x$. Then the inverse transformation method is as follows.
+$$X = F^{-1}(U), \quad U \sim U([0,1]),$$.
+where $F^{-1}$ is the inverse of the distribution of $F$ and is correctly determined when $F$ is strictly increasing. To get around the problem where $F$ is flattened (because there the inverse function will not be correctly defined), the inverse function is defined by
+$$F^{-1}(u) = \inf\{x: \quad F(x) \geq u\}.$$
+
+Note, however, that if $F$ is constant on some interval $[a,b]$, and $X$ has a distribution of $F$ then 
+$$P(a < X \leq b) = F(b) - F(a) = 0$$.
+so such areas have zero probability for a random variable to occur there. If $F$ has a continuous derivative (density) then it is strictly increasing wherever the density is non-zero. To show that the inverse transformation method generates samples from the distribution of $F$, we check the distribution of $X$, which returns
+$$P(X\leq x) = P(F^{-1}(U)\leq x) = P(U\leq F(x)) = F(x)$$
+Moreover, this method can be interpreted as the fact that the percentile into which $X$ "falls" has a uniform distribution. The inverse transformation method selects a uniformly distributed percentile, which it then maps to the corresponding value of the random variable. 
+
+
+## Exponential distribution
+An exponential distribution with mean $theta$ has a distribution.
+$$F(x) = 1-e^{-x\theta}, \quad x\geq 0.$$.
+This is, for example, the distribution of the time between jumps in a Poisson process with intensity $1/theta$. By inverting the distribution, we will obtain the ability to create an algorithm to generate samples from an exponential distribution through a uniform distribution
+$$X = -\frac{1}{\theta}log{(1-U)},$$.
+but since $1-U$ has the same distribution as $U$ we can write as
+$$X = -\frac{1}{theta}log{(U)},$$.
+We will create the generator using the previously created pseudorandom number generator from the uniform distribution. 
+
+```{r pseudo-r2, echo=TRUE}
+exp_rand <- function(N,theta,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if (check_assumptions(m,a,c) == 'Assumptions met!' & mode=="self"){
+    U <- lcgen(N,m,a,c,x)
+    X <- -1/theta*log(U)
+
+  }
+  else if (check_assumptions(m,a,c) != 'Assumptions met!' & mode=="self"){
+    print("Values for assumptions incorrect!")
+    U <- lcgen(N,m,a,c,x)
+    X <- -1/theta*log(U)
+
+  }
+  else {
+    U <- runif(N)
+    X <- -1/theta*log(U)
+  }
+  return(X)
+}
+
+```
+
+We will also create a function that generates a histogram along with a density function and returns basic descriptive statistics, namely mean, median, variance and standard deviation, as well as theoretical values.
+
+```{r pseudo-r200, echo=TRUE}
+plot_and_check <- function(X, theta, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = 1/theta
+  median = log(2)/theta
+  var = 1/(theta^2)
+  std = sqrt(var)
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Theoretical values:")
+  print(paste("Average: ", mean, ", Median: ", median))
+  print(paste("Variance: ", var, ", STD: ", std))
+  print("Wartości wygenerowane:")
+  print(paste("Average: ", mean_x, ", Median: ", median_x))
+  print(paste("Variance: ", var_x, ", STD: ", std_x))
+  }
+```
+
+Let's check for invalid values
+
+```{r pseudo-r21, echo=TRUE}
+exp <- exp_rand(N=1000, theta=1, m=nonvalid[1], a=nonvalid[2], c=nonvalid[3], x=nonvalid[4])
+plot_and_check(exp, theta=1, "Exponential distribution - incorrect parameters")
+```
+
+One can easily see absurd results in the absence of fulfilled assumptions for the generator of numbers from a uniform distribution. Moreover, the descriptive statistics are significantly different from the theoretical ones. Let's check the generator for relatively correct values.
+
+```{r pseudo-r22, echo=TRUE}
+exp <- exp_rand(N=1000, theta=1, m=badvalid[1], a=badvalid[2], c=badvalid[3], x=badvalid[4])
+plot_and_check(exp, theta=1, title= "Exponential distribution - poor choice of parameters")
+```
+
+There is an improvement in performance, but there are undesirable "hills." Moreover, the descriptive statistics, although more similar, still deviate quite a bit from the theoretical values. Let's check for the correct values.
+
+```{r pseudo-r23, echo=TRUE}
+exp <- exp_rand(N=1000, theta=1, m=valid[1], a=valid[2], c=valid[3], x=valid[4])
+plot_and_check(exp, theta=1, title = "Exponential distribution - relatively good choice of parameters")
+```
+
+We can now see that the "hills" have been almost completely eliminated and our distribution resembles an exponential distribution. In addition, the statistics generated are strongly close to the theoretical statistics. Possible stronger deviations are seen with the variance. Let's compare it with the distribution generated with the built-in generator.
+
+```{r pseudo-r231, echo=TRUE}
+exp <- rexp(1000, rate=1)
+plot_and_check(exp, theta=1, title="Exponential distribution from embedded generator")
+```
+
+We can see that the built-in generator performs similarly. Also, the statistics generated are slightly deviated from the theoretical ones. However, it should be noted that properly selected parameters for the linear congruence generator are crucial. In the case of selecting such that do not meet the assumptions or with too little "randomness", our results will not be satisfactory, so we should pay attention to selecting such parameters for which the obtained randomness will be sufficient to generate a pseudo-random sample coming from another family of distributions. Let's check the results for other parameters $\theta$, including $\theta = 3/2$.
+
+```{r pseudo-r26, echo=TRUE}
+exp6 <- exp_rand(N=1000, theta=3/2, mode="implemented")
+plot_and_check(exp6, theta=3/2, title = "Exponential distribution theta = 3/2")
+```
+```{r pseudo-r27, echo=TRUE}
+exp7 <- rexp(1000, rate=3/2)
+plot_and_check(exp7, theta=3/2, title= "Exponential distribution for embedded theta generator = 3/2")
+```
+
+As can be seen, both generators are relatively good generators. The descriptive statistics for the generated vectors are close to the theoretical values even when the parameter is changed. So we created a generator of numbers from an exponential distribution using the previously implemented generator of pseudorandom numbers from a uniform distribution. Let's move on to the next distribution.
+
+## Weibull distribution
+The Weibull distribution with parameters $\theta$ and $k$ has the distribution
+$$F(x) = 1-e^{-(x\theta)^k}, \quad x\geq 0.$$.
+Depending on the choice of $k$, we can actually get an exponential distribution ($k=1$), or a Rayleigh distribution ($k=2$) and even a normal distribution (for large $k$). By inverting the distributions, we will get the ability to create an algorithm to generate samples from the Weibull distribution through the uniform distribution
+$$X = |\theta|(-log{(1-U)})^{1/k},$$.
+but since $1-U$ has the same distribution as $U$ we can write as
+$$X = |\theta|(-log{(U)})^{1/k},$$.
+We will create the generator using the previously created pseudorandom number generator from the uniform distribution. 
+
+```{r pseudo-r3, echo=TRUE}
+weibull_rand <- function(N,theta,k,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if (check_assumptions(m,a,c) == 'Assumptions met!' & mode=="self"){
+    U <- lcgen(N,m,a,c,x)
+    X <- abs(theta)*(-log(U))^(1/k)
+
+  }
+  else if (check_assumptions(m,a,c) != 'Assumptions met!' & mode=="self"){
+    print("Values for assumptions incorrect!")
+    U <- lcgen(N,m,a,c,x)
+    X <- abs(theta)*(-log(U))^(1/k)
+
+  }
+  else {
+    U <- runif(N)
+    X <- abs(theta)*(-log(U))^(1/k)
+
+  }
+  return(X)
+}
+
+```
+
+We will also create a function that generates a histogram along with a density function and returns basic descriptive statistics, namely mean, median, variance and standard deviation, as well as theoretical values.
+
+```{r pseudo-r300, echo=TRUE}
+plot_and_check_weibull <- function(X, theta, k, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = theta*gamma(1+1/k)
+  median = theta*log(2)^(1/k)
+  var = theta^2 * gamma(1+2/k) - (theta*gamma(1+1/k))^2
+  std = sqrt(var)
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Theoretical values:")
+  print(paste("Average: ", mean, ", Median: ", median))
+  print(paste("Variance: ", var, ", STD: ", std))
+  print("Generated values:")
+  print(paste("Average: ", mean_x, ", Median: ", median_x))
+  print(paste("Variance: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Let's check for invalid values
+
+```{r pseudo-r31, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=1, k=1, m=nonvalid[1], a=nonvalid[2], c=nonvalid[3], x=nonvalid[4])
+plot_and_check_weibull(weib, theta=1, k =1, title = "Weibull distribution (k=1 - exponential) - incorrect parameters")
+```
+
+You can easily see identical results to the Exponential distribution generator. The results obtained are also incorrect, and the statistics differ significantly. Let's check the generator for relatively correct values.
+
+```{r pseudo-r32, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=1, k =1, m=badvalid[1], a=badvalid[2], c=badvalid[3], x=badvalid[4])
+plot_and_check_weibull(weib, theta=1, k=1, title= "Weibull distribution (k=1) - poor choice of parameters")
+```
+
+Again we can see the improve of the results but also with the "hills". Let's check for the correct values.
+
+```{r pseudo-r33, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=1, k=1, m=valid[1], a=valid[2], c=valid[3], x=valid[4])
+plot_and_check_weibull(weib, theta=1, k=1, title = "Weibull distribution (k=1) - relatively good choice of parameters")
+```
+
+We now see that the "hills" have been almost completely eliminated and our distribution resembles an exponential distribution (this is how it should come out at $k=1$). In addition, the statistics generated are strongly close to the theoretical statistics. We have already shown, both in the previous report and in this one with two examples, that proper selection of parameters for the linear congruence generator is essential to obtain satisfactory results - after all, they are what we base our subsequent generators on. In order to reduce the amount of text, we will omit testing on the wrong parameters in the following section due to the fact that their relevance has already been shown. Moreover, as mentioned in the previous report, when using a pseudorandom number generator from a uniform distribution, there is no need to select the appropriate parameters. Taking this into account, as well as the fact that we could probably select even better parameter values for our generator from the uniform distribution, we will continue to use the built-in generator for numbers from the uniform distribution. This approach will provide the most reliable representation of pseudo-randomness. Specifically for such a case, a "mode" parameter was implemented in each function to allow the selection of the generator. Let's now check the values for the other parameters $k$ and $\theta$ and compare it with the distribution generated using the built-in generator.
+
+```{r pseudo-r3433, echo=TRUE}
+exp <- rweibull(1000, scale=1, shape=1)
+plot_and_check_weibull(exp, theta=1, k=1,title="Weibull distribution from embedded generator (for k=1)")
+```
+
+We can see that the built-in generator performs similarly. Also, the statistics generated in a small way are deviated from the theoretical ones. Quite like the exponential distribution, this is important information, as it tells us the correct way to build the Weibull distribution generator - with this choice of parameter $k$ exactly the exponential distribution is desired.
+Let's check the results for other parameters $\theta$ and $k$, including $\theta = 2$ and $k=2$ (Rayleigh distribution).
+
+```{r pseudo-r35, echo=TRUE}
+weib <- weibull_rand(N=1000, theta=2, k=2, mode="implemented")
+plot_and_check_weibull(weib, theta=2, k=2, title = "Weibull distribution (k=2) theta = 2")
+```
+```{r pseudo-r34, echo=TRUE}
+w2 <- rweibull(1000, scale=2, shape=2)
+plot_and_check_weibull(w2, theta=2, k=2,title="Weibull distribution from embedded generator (for k=2)")
+```
+
+We received again very similar results. Visualization of the distributions (using the built-in generator and our own) shows how close they are. However, it is the statistics that are key and most reliable here, and the values are not far from the theoretical values. It can be deduced that the generator we created performs quite well compared to the built-in generator.  
+
+## The distribution of the arcus sine
+The distribution of the arcus sine models the time at which Brownian motion reaches its maximum on the interval $[0,1]$ and can be expressed by the distributant
+
+By inverting the distribution, we will obtain the ability to create an algorithm to generate samples from the arcsine distribution through the uniform distribution
+$$X = \sin^2(U\pi/2),$$.
+but since we can use the property $2\sin^2(t)=1-\cos(2t)$ then.
+$$X = \frac{1}{2} - \frac{1}{2}\cos(U\pi),$$.
+We will create the generator, again, using the previously created pseudorandom number generator from the uniform distribution. 
+
+```{r pseudo-r4, echo=TRUE}
+arcsin_rand <- function(N,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if (check_assumptions(m,a,c) == 'Assumptions met!' & mode=="self"){
+    U <- lcgen(N,m,a,c,x)
+    X <- 1/2 - 1/2*cos(U*pi)
+  }
+  else if (check_assumptions(m,a,c) != 'Assumptions met!' & mode=="self"){
+    print("Values for assumptions incorrect!")
+    U <- lcgen(N,m,a,c,x)
+    X <- 1/2 - 1/2*cos(U*pi)
+  } else {
+    U <- runif(N)
+    X <- 1/2 - 1/2*cos(U*pi)
+    
+  }
+  return(X)
+}
+
+```
+
+We will also create, once again for the new distribution, a function that generates a histogram along with a density function and returns basic descriptive statistics, namely the mean, median, variance and standard deviation, as well as theoretical values.
+
+```{r pseudo-r400, echo=TRUE}
+plot_and_check_arcsin <- function(X, theta, k, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = 1/2
+  median = 1/2
+  var = 1/8
+  std = sqrt(var)
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Theoretical values:")
+  print(paste("Average: ", mean, ", Median: ", median))
+  print(paste("Variance: ", var, ", STD: ", std))
+  print("Generated values:")
+  print(paste("Average: ", mean_x, ", Median: ", median_x))
+  print(paste("Variance: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Let's generate a certain sample and compare the values of the statistics to the theoretical values.
+
+```{r pseudo-r4111, echo=TRUE}
+arc <- arcsin_rand(N=1000, mode="implemented")
+plot_and_check_arcsin(arc, title = "Arcus sine distribution N=1000")
+```
+
+There are some deviations in the statistics, but the values look reasonable and are close to theoretical. Let's check the situation for a smaller sample of $N=$100 out of curiosity.
+
+```{r pseudo-r42321, echo=TRUE}
+arc <- arcsin_rand(N=10, mode="implemented")
+plot_and_check_arcsin(arc, title = "Arcus sine distribution N=10")
+```
+
+Now we already see significant deviations, but this is expected. Let's check for a larger sample $N=10000$.
+
+```{r pseudo-r41, echo=TRUE}
+arc <- arcsin_rand(N=10000, mode="implemented")
+plot_and_check_arcsin(arc, title = "Arcus sine distribution N=10000")
+```
+ 
+The values are almost of the same value. The generator achieves great results, but I have not been able to find a built-in generator of this distribution, to which one could additionally collate the results obtained. So let's move on to another generator of numbers from the normal distribution.
+
+## Normal distribution
+We will use two approaches to generate numbers from the normal distribution. The first will be implemented using the double exponential. To do this, let's note that the density of the double exponential distribution on a simple $(-\infty, +\infty)$ is 
+$$g(x) = \frac{e^{-|x|}}{2}$$.
+while the density of the normal distribution is equal to
+$$f(x) = e^{-x^2/2}/{\sqrt{2}}$$.
+The ratio is as follows
+$$\frac{f(x)}{g(x)} = \sqrt{\frac{2}{\pi}}e^{\frac{1}{2}x^2 + |x|}  = \sqrt{\frac{2e}{\pi}}. \approx 1.3155 \equiv c.$$.
+Hence, the density of the normal distribution is dominated by the scaled density of the double exponential distribution $cg(x)$. We are able to generate a sample from the double exponential distribution by using a previously created generator and drawing a certain set of values from it and then randomly determining the sign. In turn, the sample rejection test $u > f(x)/cg(x)$ can be implemented as follows.
+$$u > e^{\frac{1}{2}x^2 + |x| -\frac{1}{2}} = e^{-\frac{1}{2}(|x| - 1)^2}.$$
+In the context of the symmetry of the two densities $f$ and $g$, it is important to generate a positive sample and determine the sign only if it is accepted. In this case, the absolute value is unnecessary in the rejection test. In the end, the algorithm presents itself as follows:
+
+```{r pseudo-r6, echo=TRUE}
+normal_double <- function(N,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if ((check_assumptions(m,a,c) == 'Assumptions met!' & mode == "self") | mode != "self"){
+    X <- c()
+    i <- 0
+    while(length(X) < N){
+      i <- i+1
+      if (mode == "self"){
+        U <- lcgen(4,m,a,c,x+i)
+      } else {
+        U <- runif(4)
+      }    
+      U1 <- U[2]
+      U2 <- U[3]
+      U3 <- U[4]
+      
+      tmp <- -log(U1)
+      if (U2 > exp(-0.5*(tmp-1)^2)){
+        next
+      }else if (U3 <= 0.5){
+        tmp <- -tmp
+      }  
+      
+      X <- append(X,tmp)
+    }
+    return(X)
+    }else{
+      print("Values for assumptions incorrect!")
+      return(0)
+    }
+  }
+```
+
+In addition, we create a function to plot the results obtained, along with a comparison of the descriptive statistics obtained from the sample with the theoretical statistics for a normal distribution.
+
+```{r pseudo-r600, echo=TRUE}
+plot_and_check_normal <- function(X, title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = 0
+  median = 0
+  var = 1
+  std = 1
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Theoretical values:")
+  print(paste("Average: ", mean, ", Median: ", median))
+  print(paste("Variance: ", var, ", STD: ", std))
+  print("Generated values:")
+  print(paste("Average: ", mean_x, ", Median: ", median_x))
+  print(paste("Variance: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Let's check our generator.
+
+```{r pseudo-r61, echo=TRUE}
+nor <- normal_double(N=1000, mode="implemented")
+plot_and_check_normal(nor, title = "Standard normal distribution generated by double exponential method")
+```
+
+We can see that it indeed resembles a standard normal distribution. Moreover, the obtained descriptive statistics do not deviate much from the theoretical statistics. Let's compare it further to the embedded generator.
+
+```{r pseudo-r62, echo=TRUE}
+nor <- rnorm(n=1000)
+plot_and_check_normal(nor, title = "Standard normal distribution generated by embedded generator")
+```
+
+Interestingly, with a sample size of $N=1000$, our double exponential generator achieved even closer values of descriptive statistics (theoretical statistics) than the built-in generator. One could conclude that it is a more accurate generator. But let's move on to the second method which is the Box-Muller method. This method is one of the simpler to implement (but not the fastest). It generates a sample from a two-dimensional standard normal distribution, where each of the individual dimensions is, of course, from a one-dimensional normal distribution. This algorithm is based on the following two properties of the two-dimensional normal distribution. Specifically, if $Z \sim N(0, I_2)$ then. 
+1. $R = Z_{1}^{2} + Z_{2}^{2}$ has an exponential distribution with mean $2$, i.e.
+$$P(R \leq x) = 1 - e^{-x/2}.$$.
+
+
+2. given $R$, the point $(Z_1,Z_2)$ has a uniform distribution on a circle of radius $\sqrt{R}$ and centered at the origin of the coordinate system.
+
+So in order to generate a two-dimensional standard normal distribution $(Z_1, Z_2)$, we first want to generate $R$ and then select a point from the uniform distribution on a circle of radius $\sqrt{R}$. To sample from an exponential distribution, we can set $R = -2log(U_1)$, where $U_1 = U[0,1]$. On the other hand, to generate a point from a circle, we can draw a uniform angle contained between $[0, 2\pi]$ and map it as a point on that circle. Such an angle can be generated by $V = 2\pi U_2$, where $U_2 \sim U[0,1]$. Then the corresponding point of this angle has the coordinates $(\sqrt{R}\cos(V), \sqrt{R}\sin(V))$. The implementation of the algorithm is as follows.
+
+```{r pseudo-r8, echo=TRUE}
+normal_box <- function(N,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if ((check_assumptions(m,a,c) == 'Assumptions met!' & mode == "self") | mode != "self"){
+    X <- c()
+    i <- 0
+    while(length(X) < N){
+      i <- i+1
+      if (mode=="self"){
+        U <- lcgen(3,m,a,c,x+i)
+      } else{
+        U <- runif(3)
+      }    
+      U1 <- U[2]
+      U2 <- U[3]
+      R <- -2*log(U1)
+      V <- 2*pi*U2
+      
+      Z1 <- sqrt(R)*cos(V)
+      Z2 <- sqrt(R)*sin(V)
+      
+      
+      X <- append(X,c(Z1,Z2))
+    }
+    return(X)
+    }else{
+      print("Values for assumptions incorrect!")
+      return(0)
+    }
+  }
+```
+```{r pseudo-r82, echo=TRUE}
+box <- normal_box(N=1000, mode="implemented")
+plot_and_check_normal(box, title = "Standard normal distribution generated by the Box-Muller method")
+```
+
+As we can see, the values are also quite decent, but already not much worse (in terms of descriptive statistics) than the built-in generator. Visually, we can see to what extent the algorithm approximates the standard normal distribution. Thus, we implemented a pseudorandom number generator from a standard normal distribution using two methods - the double exponential method and the Box-Muller method. Our next and final step with pseudorandom number generators will be a generator from the Poisson distribution.
+
+## Poisson distribution
+Poisson distribution with mean $\theta >0$ is given by the formula
+$$ P(N=k) = e^{-{\theta}}\frac{\theta^k}{k!}, \quad k=1,2,3,...$$
+We denote this by writing $N\sim Poisson(\theta)$. This is the distribution of the number of events in the interval $[0,1]$ when the times between each event are independent and have an exponential distribution with mean $1/\theta$. Then, a simple method of generating pseudorandom numbers from Poisson distribution is to generate exponential random variables $X_i = -log(U_i)/\theta$ from independent uniform distributions $U_i$, and then take $N$ as the largest integer for which $X_1 + .... + X_N \leq 1$. However, this method is rather slow, especially if $U_i$ is large. So there is an alternative method using the inverse transformation method. For discrete distributions, it amounts to a sequential search for the smallest $n$ in which $F(n) \leq U$, where $F$ denotes the distribution and $U\sim U[0,1]$. In the case of Poisson distribution, $F(n)$ is calculated as $P(N=0) + .... + P(N = n)$. Rather, instead of counting each individual expression, you can use the relation $P(N = k+1) = P(N=k)\theta / (k+1)$. The implementation of the algorithm is as follows.
+
+```{r pseudo-r9, echo=TRUE}
+poisson <- function(N,theta,m=valid[1], a=valid[2], c=valid[3], x=valid[4], mode="self"){
+  if ((check_assumptions(m,a,c) == 'Assumptions met!' & mode == "self") | mode != "self"){
+    X <- c()
+    i <- 0
+    while(length(X) < N){
+      p <- exp(-theta)
+      Fd <- p
+      Nbig <- 0
+      
+      i <- i+1
+      if (mode == "self"){
+        U <- lcgen(2,m,a,c,x+i)
+      }else{
+        U <- runif(2)
+      }      
+      U1 <- U[2]
+      while (U1 > Fd){
+        Nbig <- Nbig + 1
+        p <- p*theta/Nbig
+        Fd <- Fd + p
+        }
+      X <- append(X,Nbig)
+      }
+    return(X)
+    }else{
+      print("Values for assumptions incorrect!")
+      return(0)
+    }
+}
+```
+```{r pseudo-r900, echo=TRUE}
+plot_and_check_poiss <- function(X, theta,title){
+  hist(X, prob=TRUE, col="grey", main=title)
+  lines(density(X), col="blue", lwd=2)
+  
+  mean = theta
+  median = (theta + 1/3 - 0.02/theta)
+  var = theta
+  std = 1
+  
+  mean_x = mean(X)
+  median_x = median(X)
+  var_x = var(X)
+  std_x = sqrt(var_x)
+  
+  t <- c(mean, median, var, std)
+  p <- c(mean_x, median_x, var_x, std_x)
+  
+  print("Theoretical values:")
+  print(paste("Average: ", mean, ", Median: ", median))
+  print(paste("Variance: ", var, ", STD: ", std))
+  print("Generated values:")
+  print(paste("Average: ", mean_x, ", Median: ", median_x))
+  print(paste("Variance: ", var_x, ", STD: ", std_x))
+  
+  }
+```
+
+Now let's check the generated values for $\theta =1$ and a sample of $N=1000$. 
+
+```{r pseudo-r91, echo=TRUE}
+pois <- poisson(N=1000,theta=1, mode="implemented")
+plot_and_check_poiss(pois, theta=1, title = "Poisson distribution with theta=1 for N=1000")
+```
+
+The comparison of descriptive statistics from the sample and theoretical statistics looks very good. The values do not deviate too much from each other. The graph of the probability density function together with the histogram may look not very promising at first glance, but keep in mind that we are modeling here the number of events over a period of time. To be sure, let's compare to a sample generated from an embedded generator. 
+
+```{r pseudo-r92, echo=TRUE}
+pois <- rpois(1000,1)
+plot_and_check_poiss(pois, theta=1, title = "Poisson distribution with theta=1 for N=1000")
+```
+
+As we can see, the values of the statistics are even more similar for our generator than for the built-in generator. In addition, we can see that the graphs are shaped in a similar way. This means that our generator performs very well. Let's test it some more for other $theta$ parameters to look at what the Poisson distributions look like then.
+
+```{r pseudo-r93, echo=TRUE}
+pois <- poisson(N=1000,theta=2, mode="implemented")
+plot_and_check_poiss(pois, theta=2, title = "Poisson distribution with theta=2 for N=1000")
+```
+```{r pseudo-r94, echo=TRUE}
+pois <- poisson(N=1000,theta=3, mode="implemented")
+plot_and_check_poiss(pois, theta=3, title = "Poisson distribution with theta=3 for N=1000")
+```
+```{r pseudo-r95, echo=TRUE}
+pois <- poisson(N=1000,theta=4, mode="implemented")
+plot_and_check_poiss(pois, theta=4, title = "Poisson distribution with theta=4 for N=1000")
+```
+
+For each parameter, the values of the statistics are not too far from the theoretical values. An interesting thing to note is how the incidence of the number of events changes as the parameter $\theta$ increases. With a bit of thought, this is a matter of course, since this parameter is actually an expectation value, so the higher it is, the largest the cluster will be at a higher point. Thus, for $\theta =3$ the highest frequency is at the $3$ point, and for $\theta = 4$ at the $4$ point. 
+We have just built a robust pseudorandom number generator from the Poisson distribution. Now let's move on to the last point which is to solve a certain task using one of the built-in generators. 
+
+## Simulation of the operating time of the sorting plant
+In this task, we will consider a simplified version of a clothing sorting plant, the operation scheme of which can be illustrated as follows.
+
+![Układ sortowni](uklad.jpg)
+
+Let's assume that $1$ stands for the device that stores clothes for sorting and lets them into the halls, in case it malfunctions, no clothes will be brought in and thus sorted which will cause the sorting plant to close temporarily. The $2$ and $3$, on the other hand, are designations for the sorting machines, they operate in parallel, so when one of them breaks down, the other can still work and the sorting room will continue to operate. On the other hand, when both break down at the same time it will also cause the work to stop. The last element is $4$, which represents the device that stores the sorted clothes and takes them out of the hall, is also crucial because its stoppage will cause the sorted clothes to stop being delivered. Each of these devices has a certain "lifespan", which can be modeled using the appropriate distributions, more specifically:
+
+(a) device $1 \sim weibull(30.3)$,
+
+(b) device $2 \sim exp(0.05)$,
+
+(c) device $3 \sim exp(0.1)$,
+
+(d) device $4 \sim weibull(50,2)$.
+
+Let's denote each element with a binary variable $x_i$, where $i \in\{1,2,3,4\}$ denotes the number of the element, $x_i = 1$ when the element is fit and $x_i = 0$ when $i$th element is unfit. We will also create so-called structure functions $\phi(x) = x_1 \cdot .... \cdot x_n$ for series systems, and $\phi(x) = 1 - (1-x_1)\cdot ...\cdot(1-x_n)$ for parallel systems, where in our case the elements $1$ are connected in series with the elements $(2,3)$ and $4$, similarly $4$, while the elements $(2,3)$ are connected in parallel, and their parallel connection is a series connection with the others. We say that the system is fit when $\phi(x)=1$ and unfit when $\phi(x)=0$. Thus, in our case, we have
+$$\phi(x) = x_1 \cdot (1 - (1-x_2)\cdot(1-x_3)) \cdot x_4 = x_1 \cdot (1 - 1 + x_3 +x_2 -x_2x_3) \cdot x_4 = x_1 \cdot (x_2 + x_3 - x_2x_3)\cdot x_4.$$
+Now let's denote by $p_i = P(x_i = 1) = E(x_i)$, which is the probability of the $i$-th element being fit at a given time. Taking into account the independence of our elements, we can decompose the theoretical reliability of the system as follows
+$$E(\phi(x)) = p_1 \cdot ( p_2 + p_3 - p_2p_3)\cdot  p_4.$$
+In order to simulate the running time of such a sorting plant, we will simulate by drawing from the generators we have implemented, and in order to check, we will also recalculate the theoretical reliability using built-in functions in R. The implementation of this is as follows.
+
+```{r pseudo-task, echo=TRUE}
+#---------------SIMULATION OF SYSTEM OPERATION TIME------------------------
+#Theoretical reliability
+r <- function(t){
+  p1 = 1-pweibull(t,shape=3,scale=30)
+  p2 = 1-pexp(t,0.05)
+  p3 = 1-pexp(t,0.1)
+  p4 = 1-pweibull(t,shape=2,scale=50)
+
+  p1*(p2 + p3 - p2*p3)*p4
+}
+
+symulacja<-function(n){
+  z <- c()
+  x1 <- weibull_rand(N=n, theta=30,k=3, mode="implemented")
+  x2 <- exp_rand(N=n, theta=0.05, mode="implemented")
+  x3 <- exp_rand(N=n, theta=0.1, mode="implemented")
+  x4 <- weibull_rand(N=n, theta=50,k=2, mode="implemented")
+  
+  w <- c()
+  wx1 <- rweibull(n,shape=3,scale=30)
+  wx2 <- rexp(n,0.05)
+  wx3 <- rexp(n,0.1)
+  wx4 <- rweibull(n,shape=2,scale=50)
+  
+  
+  for(i in 1:n){
+    z[i]<- min(x1[i], max(x2[i],x3[i]),x4[i])
+    w[i]<- min(wx1[i], max(wx2[i],wx3[i]),wx4[i])
+  }
+  
+  #Srednia teoretyczna:
+  teor <- integrate(r,0,Inf)
+  print("Theoretical average: ")
+  print(teor)
+  #Z symulacji:
+  print("Average empirical value from own generators: ")
+  print(mean(z))
+  print("Empirical average value from embedded generators: ")
+  print(mean(w))
+  hist(z, main='Life time histogram', ylab='Frequency')
+
+}
+```
+
+In addition to simulating the mean lifetime, the function additionally calculates the mean theoretical value. Moreover, it sketches the empirical and theoretical distributions, as well as checks whether they are linearly dependent by creating a linear model. Let's check the results for $n=100$.
+
+```{r pseudo-task2, echo=TRUE}
+symulacja(100)
+```
+
+And for a more numerous simulation $n=10000$.
+
+```{r pseudo-task3, echo=TRUE}
+symulacja(10000)
+```
+
+The theoretical values, of course, do not change, but it is certain that a more numerous sample offers greater model stability. As you can see, both with our own and built-in generators, results close to the theoretical one were obtained. We just calculated the theoretical average value of the sorting plant's operating time, which is about 15 days. In addition, we have prepared a simulation using pseudo-random number generators from the exponential and Weibull distribution (our own as well as built-in) through which we have shown the validity of the theoretical result. In addition, we are able to visualize by means of a histogram, the average uptime of sorting plants with such equipment, whose uptime can be expressed using these distributions. 
+
+## Summary
+In this report, a superficial theory has been introduced on how to create pseudorandom number generators derived from distributions such as exponential, Weibull, arcsine, normal (by two methods) and Poisson distributions using a number generator from a uniform distribution. Here we have taken both our own linear congruence generator, as well as in further considerations, in order to standardize, an embedded generator. We showed once again the relevance of the assumptions of the linear congruence generator and their effect on the results with particular other distributions. Most of it was based on the inverse transformation method, although there was also a part involving a rejection test. Moreover, Muller's box algorithm and the double exponential method for generating numbers from a standard normal distribution were also presented. Finally, the constructed exponential and Weibull generators were used to perform the task of simulating the average uptime of a certain sorting plant, which was briefly described in the introduction.

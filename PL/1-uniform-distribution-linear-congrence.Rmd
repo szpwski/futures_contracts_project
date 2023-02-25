@@ -1,6 +1,6 @@
 ---
 title: "Generator liczb pseudolosowych z rozkładu jednostajnego metodą liniowej kongruencji"
-author: "Szymon Pawłowski s176528"
+author: "Szymon Pawłowski"
 output: pdf_document
 ---
 

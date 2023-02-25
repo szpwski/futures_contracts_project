@@ -1,0 +1,386 @@
+---
+title: Generator of pseudorandom numbers from uniform distribution by linear congruence
+  method
+author: "Szymon Pawłowski"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r linear-setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Generator of pseudorandom numbers from uniform distribution by linear congruence method
+## Introduction
+A pseudorandom number generator is called a procedure that generates random variables 
+$U_1, U_2, ...$, such that:
+
+1. $\forall_{i} \quad U_i \sim U(0,1)$,
+2. the random variables $U_i$ are mutually independent.
+
+With the second property being important because it implies the lack of correlation between all pairs of random variables and the fact that the random variable $U_i$ should not be predictable from the other random variables $U_1, ..., U_{i-1}$. 
+
+Such a pseudorandom number generator provides a finite sequence of numbers $u_1, u_2, ..., u_K$ on a unit interval, which mostly depend on the values of the generator parameters given by the user. Each such sequence represents a set of possible outcomes of independent variables $U_1, ..., U_K$, whereby small, relative to $K$, subsets of these sequences should be difficult to distinguish from realizations of a sequence of random variables from a uniform distribution.
+
+An efficient generator returns values that are consistent with conditions (1) and (2) above. With a sufficiently large $K$, the fraction of generated values from a unit subinterval should be approximately equal to the length of that subinterval. Moreover, independence suggests that no pattern should be discernible in plotting the generated numbers.  
+
+## Example generator
+One of the example generators of pseudorandom numbers is the linear congruence generator. It can be expressed as follows
+$$x_{i+1} = ax_i \ mod(m),$$.
+$$u_{i+1} = \frac{x_{i+1}}{m},$$.
+In this case, the parameter $a$ is called *modulo*, while $m$ is called *modulo*. These are constants that determine the generated values when given an additional initialization value (*grain*) $x_0$. The grain is a user-specified integer with a value lying between $1$ and $m-1$.
+
+We can write the operation $y \ mod(m)$ in another way
+$$y \ mod(m) = y - \lfloor \frac{y}{m} \rfloor \space m,$$.
+where $\lfloor x \rfloor$ is the highest integer less than or equal to $x$. As you can see, the modulo operation will always return a value between $0$ and $m-1$. Hence, the values of $u_i$ returned by the generator will always lie between $0$ and $(m-1)/m$, and in particular, will lie on the unit interval. 
+
+Also note the term *full period*. A linear congruence generator reaches full period when it returns $m-1$ different values before any of them are repeated. In practice, it is expected to generate a huge number of different values (e.g. $10$ million) before any repetition occurs. In order to obtain such a result, **it is not enough** to set the $m$ parameter with a high value, since a poor choice of the $a$ parameter may result in the generation of numbers with short periods. 
+
+## General rules for the construction of a pseudorandom number generator.
+When constructing a pseudorandom number generator, consider the following aspects:
+
+1. **Length of the period**, that is, the time to repeat the value. As a rule, the longer the period the better, so a generator is expected to produce as many different values as possible before repetition occurs. For a linear congruence generator with modulo $m$, the period is $m-1$. Such a generator reaches **full period** when the intervals between individual values of $u_i$ are of length $1/m$, so the higher the value of $m$, the more the generated values will approximate a uniform distribution.
+2. **Reproducibility**, as it is often important to be able to reproduce the simulation using the same parameters and obtaining the same values. In the case of a linear congruence generator (or any other in general form), we get such an effect by setting the seed $x_0$. 
+3. **Speed**, since a pseudorandom number generator can be tasked with producing thousands or more values in a single simulation, care should be taken about the processing time of such a situation.
+4. **Transparency**, that is, to produce the same sequences of generated values on all computer platforms. In the case of a linear congruence generator, there is sometimes a problem with different approaches to rounding values by which different results can be obtained.
+5. **Randomness** is the most important aspect, which is the most difficult to ensure. In practice, two approaches are used to ensure randomness: theoretical properties and statistical tests.
+
+## Linear congruence generator
+The linear congruence generator can be represented in general form
+$$x_{i+1} = (ax_i + c) \ mod(m)$$.
+$$u_{i+1} = x_{i+1}/m$$.
+Whereby the values of $a$, $m$ and $c$ must be integers. Moreover, there are certain conditions that ensure that the generator is fully periodic (that is, when from any seed $x_o$ the number of different values generated is $m-1$). Thus, when $c \neq 0$ one should make:
+
+1. $c$ and $m$ are relatively prime, and so that their greatest common divisor is $1$;
+2. every first number that divides $m$ also divides $a-1$;
+3. the number $a-1$ is divisible by $4$ if $m$ is.
+
+The above conditions imply the fact that if $m$ is some power of $2$ then the generator has a full period when $c$ is odd and $a=4n + 1$ for some integer $n$.
+
+On the other hand, when $c=0$ and $m$ is a prime number, the full period is reached from any $x_0$ if:
+
+1. $a^{m-1} - 1$ is not a multiple of $m$;
+2. $a^j - 1$ is not a multiple of $m$ for $j = 1, ..., m-2$.
+
+Such a number $a$ is called the **primary root** of the number $m$. 
+It can be seen that in such a case, the sequence ${x_i}$ takes the form 
+$$x_0,\ ax_0,\ a^2x_0, \ a^3x_0,\ ..., \ (mod(m)).$$.
+
+Then, when $x_0 \neq 0$ then all the expressions of $x_i$ are also non-zero. Moreover, a generator with a parameter $c \neq 0$ is slower than one with a zero parameter, so it is customary to take a parameter $c=0$. It is then necessary to choose a prime number for $m$ to allow the construction of a generator with a full period, by simply finding the primes of $m$. 
+
+Below is an example function taking the form of a linear congruence generator, where the parameter $n$ determines the length of the vector of generated values, and the other parameters are analogous to those presented in the theory. 
+
+```{r linear-func, echo=TRUE}
+lcgen <- function(n, m, a, c, x){
+  
+  gen <- vector(length = n)
+  
+  for (i in 1:n){
+    x <- (a * x + c) %% m
+    gen[i] <- x/m
+  }
+  
+  return(gen)
+}
+```
+
+Let's check the performance of the implemented generator for certain small values by sticking to the given assumptions. To make it easier to check them we will implement additional functions, including:
+
+1. a function that checks whether certain two numbers are relatively prime:
+
+```{r linear-func2, echo=TRUE}
+gcd <- function(x,y) {
+  r <- x%%y;
+  return(ifelse(r, gcd(y, r), y))
+}
+```
+
+2. a function that checks whether every first number dividing a certain number $x$, also divides $y$:
+
+```{r linear-func3, echo=TRUE}
+prime_division <- function(x,y){
+  is_prime <- function(n) n == 2L || all(n %% 2L:max(2,floor(sqrt(n))) != 0)
+  
+  div <- c(1:(y-1))
+  divisors <- div[x %% div == 0]
+  
+  primes <- c()
+  for (i in 1:length(divisors)){
+    if (is_prime(divisors[i])==TRUE){
+      if ((y-1) %% divisors[i] == 0){
+        
+        primes <- c(primes, TRUE)
+      
+      } else {
+        print(divisors[i])
+        primes <- c(primes, FALSE)
+      }
+    }
+  }
+  return(primes)
+  
+ 1092 %% 2
+}
+
+```
+
+3. function that checks divisibility by $4$:
+
+```{r linear-func4, echo=TRUE}
+four_division <- function(x,y){
+  if (((x %% 4 == 0) & ((y-1) %% 4 == 0)) | ((x %% 4 != 0) & ((y-1) %% 4 != 0))){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+```
+
+4. a function that checks whether a given number $x$ is not a multiple of a number $y$:
+
+```{r linear-func5, echo=TRUE}
+multiplication <- function(x,y){
+  if (y %% (x^(y-1)) != 0){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+```
+
+5. a function that checks whether a given number $x$ is not a multiple of a number $y$ for different values of exponents of powers:
+
+```{r linear-func6, echo=TRUE}
+multi_multiplication <- function(x,y){
+  info <- c()
+  for (i in 1:(x-2)){
+    if (y %% (x^i - 1) == 0){
+      info <- c(info, FALSE)
+    } else {
+      info <- c(info, TRUE)
+    }
+  }
+  return(info)
+}
+
+```
+
+Using them, we construct a general function to check the validity of assumptions.
+
+```{r linear-func7, echo=TRUE}
+check_assumptions <- function(m,a,c){
+  if (c != 0){
+    if (gcd(c,m) == 1){
+      if (all(prime_division(m, a))==TRUE){
+        if (four_division(m, a)==TRUE){
+          return("Assumptions met!")
+        }
+        else{
+          return("Error: the number m divisible by 4, but (a-1) is not!")
+        }
+      } else {
+        return("Error: not every first number dividing m also divides a-1!")
+      }
+    } else {
+      return("Error: the numbers c and m are not relatively prime!")
+    }
+  } else if (c == 0){
+    if (multiplication(m, a)==TRUE){
+      if (all(multi_multiplication(m,a))==TRUE){
+        return("Assumptions met!")
+      } else {
+        return("Error: the number a^j - 1 is a multiple of m for some j!")
+      }
+    } else {
+      return("Error: the number a^(m-1) is a multiple of m!")
+    }
+  } else {
+    return("The case has not been served!")
+  }
+}
+```
+
+Having defined tools for checking the validity of assumptions, we can test the generator for certain values. Let's start by generating $n=50$ values at a seed of $x_0=1$ with the assumed parameters
+$$ m = 53, \quad a = 20, \quad c = 0.$$.
+
+```{r linear-test1, echo=TRUE}
+check_assumptions(m=53, a=20, c=0)
+```
+
+We see that the assumed parameters meet the assumptions, so now let's generate some numbers.
+
+```{r linear-test1.1, echo=TRUE}
+lcgen(50, 53, 20, 0, 1)
+```
+
+Indeed, we have obtained generated values from the unit interval that do not repeat. According to the theory presented, changing $n$ to $n=53$ should already show us the first repetition, as the assumptions of full periodicity have been met.
+
+```{r linear-test1.3, echo=TRUE}
+lcgen(53, 53, 20, 0, 1)
+```
+
+As you can see, the last value is already the next iteration of the whole period. Let's check the operation for even smaller values by choosing
+$$m=7, \quad a=2, \quad c=0.$$.
+
+```{r linear-test2, echo=TRUE}
+check_assumptions(m=7, a=2, c=0)
+lcgen(50, 7, 2, 0, 1)
+```
+
+With such parameter values, of course, the period has a much shorter length, so the number of repetitions at $50$ generated values will be larger. Now let's check the situation for larger parameter values and $c \neq 0$ and consider the following. 
+$$m = 86436, \quad a = 1093, \quad c = 18257.$$.
+
+```{r linear-test3, echo=TRUE}
+check_assumptions(m=86436, a=1093, c=18257)
+lcgen(50, 86436, 1093, 18257, 1)
+```
+
+Again, let's change the parameters to
+$$m = 2^{11} +1, \quad a = 64, \quad c=73.$$.
+
+```{r linear-test4, echo=TRUE}
+check_assumptions(m=(2^11+1), a=64, c=73)
+lcgen(50, (2^11 + 1), 64, 73, 1)
+```
+
+Once again, the conditions are met and the generator behaves as expected. It's time to test it on parameters with incorrect assumptions, so let's take the following.
+$$m = 8, \quad a=2, \quad c=1.$$.
+
+```{r linear-test5, echo=TRUE}
+check_assumptions(m=8, a=2, c=1)
+lcgen(50, 8, 2, 1, 1)
+```
+
+The assumption that $a-1$ is divisible by 4 when $m$ is divisible has not been met. We can see that only two different values were generated, where in this case we would expect seven. Let's change, then, and substitute $a=4$ to make it divisible by 4.
+
+```{r linear-test6, echo=TRUE}
+check_assumptions(m=8, a=4, c=1)
+lcgen(50, 8, 4, 1, 1)
+```
+
+Unfortunately, then the assumption of divisibility by any prime number dividing $m$ is not met, which results in generating $50$ of the same values. So let's change the value of $m$ to $m=9$, but setting $c=3$ in the process.
+
+```{r linear-test7, echo=TRUE}
+check_assumptions(m=9, a=4, c=3)
+lcgen(50, 9, 4, 1, 3)
+```
+
+This time we did not meet the assumption that $m$ and $c$ are relatively prime obtaining a sequence of numbers that does not resemble a pseudorandom sequence. So let's check the situation for $c=0$ and $a=8$ leaving $m$ the same.
+
+```{r linear-test8, echo=TRUE}
+check_assumptions(m=9, a=8, c=0)
+lcgen(50, 9, 8, 0, 3)
+```
+
+We got a sequence without a full period without any pseudo-randomness (the generated values are actually a repeating sequence of 
+of numbers $(2/3, 1/3)$). Let's still base the values $m=2$, $a=1$. 
+
+```{r linear-test9, echo=TRUE}
+check_assumptions(m=2, a=1, c=0)
+lcgen(50, 2, 1, 0, 3)
+```
+
+In such a case, we have a fixed sequence consisting of a single number. The presented erroneous examples perfectly reflect the relevance of the assumptions made, in the first part of the work, to obtain a correct linear congruence pseudorandom generator. 
+
+## The problem of exceeding the range of integers
+The examples considered above do not exceed the integer range. The situation changes somewhat when we want to use really high parameter values, for example, a large multiplier $a$. Then the generator can be constructed in a slightly different form, representing $a$ as $a=2^\alpha a_1 + a_2$, where $a_1, a_2 < 2^\alpha$, and then writing the
+$$ax_i \ mod(m) = (a_1(2^{alpha} x_i \ mod(m)) + a_2 x_i \ mod(m)) \ mod(m).$$
+
+In this way, we are able to prevent integer overruns. Writing using integer arithmetic is often faster than using floating-point arithmetic. However, in order to avoid overflow, the linear conguration generator in integer arithmetic must be limited to an extremely small value modulo $m=2^{15} - 1$. 
+
+## Visualization and evaluation
+If the random variables $U_1, U_2, U_3, ...$ are independent and come from the unitary distribution $U(0,1)$, then the $(U_1, U_2)$ random vector will also come from the unitary distribution described on the unit square, while the $(U_1, U_2, U_3)$ random vector will come from the unitary distribution described on the unit cube, and so on. Therefore, one way to compare the results of a pseudorandom generator among themselves is to map them onto a $[0,1]^d$ grid, and then see to what extent they fill the area uniformly. Ideally, no pattern would be discernible with visualization, but such does not exist because always, with sufficiently close inspection, a pattern can always be seen. However, we hope that at the desired size, it will be as inconspicuous as possible. In addition, a histogram is useful to check whether the distribution of points really resembles a uniform distribution. Let's prepare a function for plotting such a visualization:
+
+```{r linear-plot, echo=TRUE}
+# Display Results
+plotting <- function(u){
+  m <- length(u)
+  par(mfrow=c(1,2), pty="s") 
+  hist(u, breaks=10, col="wheat", main=NULL)
+  abline(h=m/10, lty="dashed")
+  u1 = u[1:(m-1)]; u2 = u[2:m] 
+  plot (u1, u2, pch=19)
+  par(mfrow=c(1,1), pty="m")
+  mtext(paste("Generated results for the length vector",m))
+}
+```
+
+Let's check for a generator with the first parameters.
+
+```{r linear-plot1, echo=TRUE}
+u <- lcgen(50, 53, 20, 0, 1)
+plotting(u)
+```
+
+We can easily see the pattern, so let's see if the length of the generated $n$ vector changes the situation.
+
+```{r linear-plot2, echo=TRUE}
+u <- lcgen(10000, 53, 20, 0, 1)
+plotting(u)
+```
+
+Some values have "leveled off" to a uniform distribution, but others have "broken through." In addition, the pattern deepens. The selected parameters evidently give rather poor results in terms of randomness. Let's change their selection and so check the second of the above-mentioned parameter examples.
+
+```{r linear-plot3, echo=TRUE}
+u <- lcgen(50, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+With $50$ of values generated, the distribution approximates a uniform distribution quite poorly, but some randomness is evident when mapping the values. Let's increase the number of samples to $n=1000$.
+
+```{r linear-plot4, echo=TRUE}
+u <- lcgen(1000, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+Immediately you can see a significant improvement, the distribution looks more and more like a uniform distribution, and the mapping begins to fill the unit square without a clear pattern. Let's go a step further and increase the number of samples again, this time to $n=10000$.
+
+```{r linear-plot5, echo=TRUE}
+u <- lcgen(10000, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+The example perfectly shows how the generated values came very close to a uniform distribution and filled almost the entire square. Unlike the first visualizations, here we can talk about well-chosen parameters, which show the accurate pseudorandomness of the generator. However, let's take an even slightly smaller sample of $n=100$ to see some correlations with respect to the parameters.
+
+```{r linear-plot6, echo=TRUE}
+u <- lcgen(100, 86436, 1093, 18257, 1)
+plotting(u)
+```
+
+Now we will change the random seed $x_0$ to the value $x_0 = 142$.
+
+```{r linear-plot7, echo=TRUE}
+u <- lcgen(100, 86436, 1093, 18257, 142)
+plotting(u)
+```
+
+We can notice on the mapping of the generated points that they are distributed differently. This is a natural consequence, since the grain initializes our starting point and guarantees the reproducibility of the results. As a final step, let's compare the above generated results with those obtained through the linear congruence generator available in the library. To do this, we will use the *fBasics* library and the *runif.lcg* function. We will start by generating a value for the sample $n=100$. 
+
+```{r linear-plot8, echo=TRUE, warning=FALSE, message=FALSE}
+library(fBasics)
+set.lcgseed(142)
+u <- runif.lcg(n=100, min=0, max=1)
+plotting(u)
+```
+
+The results are similar, the distribution resembling the unitary distribution, and the mapping without imposing patterns. So let's see which one gets faster visual convergence to the uniform distribution and unit square filling.
+
+```{r linear-plot9, echo=TRUE}
+u <- runif.lcg(n=1000, min=0, max=1)
+plotting(u)
+```
+
+Still the results are comparable, so let's take $n=$10000.
+
+```{r linear-plot10, echo=TRUE}
+u <- runif.lcg(n=10000, min=0, max=1)
+plotting(u)
+```
+
+And in this case, no change, the generator from the library at this sample size also almost completely fills the area of the square and its distribution is strongly similar to the uniform distribution. This is, of course, the expected conclusion, since both approaches use a linear congruence generator. Possible differences may arise, for example, from the timing of the generation of pseudorandom numbers due to at least the arithmetic used, as mentioned earlier. In addition, the linear congruence algorithm can be adapted in several ways depending on the assumptions made, where some may be faster. However, with the generator already implemented in the library, we have no need to initialize the parameters, which, as we have seen, can cause the generated numbers to be erroneous and not come from a uniform distribution.
+
+## Summary
+In the first part, the general idea of a pseudorandom number generator was presented, along with the conditions for obtaining an effective generator. Then an example generator, which was a linear congruence generator, was given, along with the algorithm for obtaining it. Later, the general principles of pseudorandom number generator design were discussed with important concepts such as period length, reproducibility, speed, portability and randomness. The next step was a discussion of the linear congruence generator. Its general form was given, as well as the assumptions it must meet in order to obtain from it reliable results of generated pseudorandom numbers. Based on this, the generator function and functions for checking the assumptions were created and folded into one. They proceeded to check the written generator on examples, those that met the assumptions, as well as those that did not. The results obtained were briefly interpreted and a final conclusion was drawn about the relevance of assumptions during construction. The problem of exceeding the integer range was also briefly discussed. The final step was the visualization of the results and their evaluation. Two previously used examples were cited from which relevant conclusions were drawn. Correct results were also compared with those obtained with the help of a generator built in one of the libraries and described. There are many ways to create a correct generator, but it is always necessary to check the assumptions and, above all, meet them. 
